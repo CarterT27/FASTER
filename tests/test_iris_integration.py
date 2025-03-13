@@ -11,10 +11,16 @@ from typing import Dict, List, Tuple
 from unittest.mock import patch
 import os
 from sklearn import datasets
+import openai
+import logging
 
 from faster.pipeline import Pipeline, PipelineConfig
 from faster.feature_selection import SelectionCriteria
 from faster.domain_knowledge import DomainKnowledgeExtractor
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Mock LLM response for Iris dataset
 MOCK_LLM_RESPONSE = [
@@ -113,31 +119,89 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
         'rmse': -cv_results['test_rmse'].mean()
     }
 
+def verify_openrouter_api_key() -> str:
+    """
+    Verify and retrieve the OpenRouter API key.
+    
+    Returns:
+        str: Validated API key or raises a pytest.skip exception
+    """
+    # Check if API key exists in environment
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    
+    if not api_key:
+        pytest.skip("Skipping non-mock test: OPENROUTER_API_KEY environment variable not set")
+    
+    # Validate API key format
+    if not api_key.startswith("sk-"):
+        logger.warning("Warning: OpenRouter API key does not start with 'sk-'. Key may be invalid.")
+    
+    # Check for obvious placeholder values
+    placeholder_terms = ["dummy", "test", "placeholder", "your_key", "example"]
+    if any(term in api_key.lower() for term in placeholder_terms):
+        pytest.skip(f"Skipping non-mock test: OPENROUTER_API_KEY appears to be a placeholder value")
+    
+    # Log (masked) key information for debugging
+    masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
+    logger.info(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
+    
+    return api_key
+
+def configure_openai_client(api_key: str) -> openai.OpenAI:
+    """
+    Configure and return an OpenAI client configured for OpenRouter.
+    
+    Args:
+        api_key: The OpenRouter API key
+        
+    Returns:
+        openai.OpenAI: Configured client
+    """
+    # Ensure key is properly formatted for Authorization header
+    if not api_key.startswith("Bearer ") and not api_key.startswith("bearer "):
+        auth_header = f"Bearer {api_key}"
+    else:
+        auth_header = api_key
+        
+    logger.info(f"Configuring OpenAI client with base URL: https://openrouter.ai/api/v1")
+    
+    return openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+        default_headers={
+            "HTTP-Referer": "https://github.com/jordanott/FASTER",  # Project repository
+            "X-Title": "FASTER Integration Tests",
+        }
+    )
+
 @pytest.mark.parametrize("use_mock", [True, False])
 def test_iris_integration(use_mock):
     """Integration test comparing baseline and FASTER-enhanced models on Iris dataset for regression."""
-    # Set up environment for non-mock tests
+    # Set up OpenRouter credentials for non-mock tests
     if not use_mock:
-        if "OPENROUTER_API_KEY" not in os.environ:
-            pytest.skip("Skipping non-mock test because OPENROUTER_API_KEY is not set")
-        
-        # Ensure we have a valid API key
-        api_key = os.environ.get("OPENROUTER_API_KEY")
-        if not api_key or len(api_key.strip()) == 0:
-            pytest.skip("Skipping non-mock test because OPENROUTER_API_KEY is empty")
-        
-        # Print debug info about the API key (masked)
-        masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
-        print(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
-        
-        # Verify the API key format and skip test if it appears to be a placeholder
-        if not api_key.startswith("sk-"):
-            print("Warning: OpenRouter API key does not start with 'sk-'")
-            if "dummy" in api_key.lower() or "test" in api_key.lower() or "placeholder" in api_key.lower():
-                pytest.skip("Skipping non-mock test because OPENROUTER_API_KEY appears to be a placeholder value")
-        
-        # Set the API key in the environment using the validated key
-        os.environ["OPENROUTER_API_KEY"] = api_key.strip()
+        try:
+            # Verify and get API key
+            api_key = verify_openrouter_api_key()
+            
+            # Configure OpenAI client for OpenRouter
+            client = configure_openai_client(api_key)
+            
+            # Test the client with a simple query to verify credentials work
+            try:
+                response = client.chat.completions.create(
+                    model="deepseek/deepseek-chat:free",
+                    messages=[{"role": "user", "content": "Hello, this is a test"}],
+                    temperature=0.0,
+                    max_tokens=10
+                )
+                logger.info("OpenRouter API test successful")
+            except Exception as e:
+                logger.error(f"OpenRouter API test failed: {str(e)}")
+                pytest.skip(f"Skipping non-mock test: OpenRouter API request failed: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"Error setting up OpenRouter credentials: {str(e)}")
+            pytest.skip(f"Skipping non-mock test: {str(e)}")
 
     # Load and preprocess data
     X, y = load_and_preprocess_iris()
@@ -201,7 +265,8 @@ def test_iris_integration(use_mock):
         domain_extractor = DomainKnowledgeExtractor(
             model_name=config.model_name,
             temperature=config.temperature,
-            api_key=api_key
+            api_key=api_key,
+            openai_client=client
         )
         
         # Create pipelines with configured domain extractor

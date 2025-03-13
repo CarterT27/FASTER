@@ -73,14 +73,15 @@ class DomainKnowledgeExtractor:
         self.temperature = temperature
         
         # Configure OpenRouter client with API key
+        # Set up the client according to OpenRouter documentation
         self.client = OpenAI(
             api_key=self.api_key,
             base_url="https://openrouter.ai/api/v1",
-            default_headers={
-                "HTTP-Referer": "https://github.com/cartertran/faster",
-                "X-Title": "FASTER Framework"
-            }
         )
+        
+        # Log key information (masked)
+        masked_key = self.api_key[:4] + "..." + self.api_key[-4:] if len(self.api_key) > 8 else "***"
+        logger.debug(f"Initialized OpenRouter client with key: {masked_key} (length: {len(self.api_key)})")
         
         self.prompt_config = prompt_config or self._default_prompt_config()
         self._conversation_history: List[BaseMessage] = []
@@ -162,10 +163,15 @@ class DomainKnowledgeExtractor:
                 logger.debug(f"Base URL: {self.client.base_url}")
                 logger.debug(f"Model: {self.model_name}")
                 
+                # Make the API call with the proper headers for OpenRouter
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=self.temperature
+                    temperature=self.temperature,
+                    extra_headers={
+                        "HTTP-Referer": "https://github.com/cartertran/faster",  # For rankings
+                        "X-Title": "FASTER Feature Selection Tool",  # For rankings
+                    }
                 )
                 
                 logger.info(f"LLM query successful")

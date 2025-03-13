@@ -164,13 +164,24 @@ class FeatureGenerator:
             # Log transformation for skewed features
             if (self._should_apply_log_transform(data[col]) and 
                 (is_top_feature or 'log' in recommended)):
-                result_df[f"log_{col}"] = np.log1p(data[col])
+                # Ensure all values are valid for log1p (no negative values)
+                valid_data = data[col].copy()
+                if valid_data.min() < 0:
+                    logger.warning(f"Column {col} contains negative values. Adjusting before log transformation.")
+                    # Option 1: Add the absolute minimum plus a small constant to make all values positive
+                    offset = abs(valid_data.min()) + 1e-6
+                    valid_data = valid_data + offset
+                    transform_note = f" (offset: +{offset:.6f})"
+                else:
+                    transform_note = ""
+                
+                result_df[f"log_{col}"] = np.log1p(valid_data)
                 self.transformations[f"log_{col}"] = TransformationMetadata(
                     original_features=[col],
                     transformation_type="log",
-                    parameters={},
-                    rationale="High skewness detected" if 'log' not in recommended else 
-                             "Log transform suggested by domain knowledge",
+                    parameters={"offset": offset if valid_data.min() < 0 else 0},
+                    rationale=("High skewness detected" if 'log' not in recommended else 
+                             "Log transform suggested by domain knowledge") + transform_note,
                 )
             
             # Standard scaling primarily for top features or when explicitly recommended
@@ -342,13 +353,26 @@ class FeatureGenerator:
                         else:
                             # Log1p for data that includes zeros
                             new_feature_name = f"log1p_{feature}"
-                            result_df[new_feature_name] = np.log1p(data[feature])
+                            
+                            # Check for negative values and adjust if needed
+                            valid_data = data[feature].copy()
+                            offset = 0
+                            if valid_data.min() < 0:
+                                logger.warning(f"Column {feature} contains negative values. Adjusting before log1p transformation.")
+                                # Add the absolute minimum plus a small constant to make all values positive
+                                offset = abs(valid_data.min()) + 1e-6
+                                valid_data = valid_data + offset
+                                transform_note = f" (offset: +{offset:.6f})"
+                            else:
+                                transform_note = ""
+                            
+                            result_df[new_feature_name] = np.log1p(valid_data)
                             transformed_features.add(feature)
                             self.transformations[new_feature_name] = TransformationMetadata(
                                 original_features=[feature],
                                 transformation_type="log1p",
-                                parameters={},
-                                rationale=insight.rationale,
+                                parameters={"offset": offset},
+                                rationale=insight.rationale + transform_note,
                             )
                             logger.info(f"Applied log1p transform to {feature}")
                     
