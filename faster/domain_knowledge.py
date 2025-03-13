@@ -1,0 +1,303 @@
+"""Domain knowledge extraction module using LLMs."""
+
+from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+import logging
+import uuid
+import json
+import os
+
+import pandas as pd
+from openai import OpenAI
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema import BaseMessage
+from pydantic import BaseModel
+
+from faster.utils.logging import get_logger
+from faster.utils.validation import validate_dataframe
+
+logger = get_logger(__name__)
+
+class DomainInsight(BaseModel):
+    """Structure for storing domain-specific insights about features."""
+    
+    feature_name: str
+    importance: float
+    relationships: List[str]
+    suggested_transformations: List[str]
+    rationale: str
+
+@dataclass
+class PromptConfig:
+    """Configuration for LLM prompting."""
+    
+    context_template: str
+    expert_template: str
+    feature_suggestion_template: str
+    validation_template: str
+
+class DomainKnowledgeExtractor:
+    """Extracts domain knowledge from data using LLMs."""
+
+    def __init__(
+        self,
+        model_name: str = "deepseek/deepseek-chat:free",
+        temperature: float = 0.0,
+        prompt_config: Optional[PromptConfig] = None,
+    ):
+        """Initialize the domain knowledge extractor.
+        
+        Args:
+            model_name: Name of the LLM model to use
+            temperature: Temperature for LLM sampling
+            prompt_config: Custom prompt configuration
+        """
+        if "OPENROUTER_API_KEY" not in os.environ:
+            raise ValueError(
+                "OPENROUTER_API_KEY environment variable is required. "
+                "Get your API key from https://openrouter.ai/keys"
+            )
+
+        self.model_name = model_name
+        self.temperature = temperature
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.environ["OPENROUTER_API_KEY"],
+            default_headers={
+                "HTTP-Referer": "https://github.com/cartertran/faster",  # Your project's website
+                "X-Title": "FASTER Framework",  # Your project's name
+            }
+        )
+        self.prompt_config = prompt_config or self._default_prompt_config()
+        self._conversation_history: List[BaseMessage] = []
+    
+    def extract_knowledge(
+        self,
+        data: pd.DataFrame,
+        target_column: str,
+        problem_description: str,
+        domain_context: Optional[str] = None,
+        categorical_columns: Optional[List[str]] = None,
+    ) -> List[DomainInsight]:
+        """Extract domain knowledge about features from the dataset.
+        
+        Args:
+            data: Input DataFrame
+            target_column: Name of the target variable
+            problem_description: Description of the ML problem
+            domain_context: Optional additional domain context
+            categorical_columns: Optional list of categorical column names
+            
+        Returns:
+            List of domain insights about features
+        """
+        validate_dataframe(data, target_column, categorical_columns=categorical_columns)
+        request_id = str(uuid.uuid4())
+        logger.info(f"Starting domain knowledge extraction with request ID: {request_id}")
+        
+        try:
+            # Generate dataset summary
+            data_summary = self._generate_data_summary(data, target_column)
+            
+            # Create context prompt
+            context_prompt = ChatPromptTemplate.from_template(
+                self.prompt_config.context_template
+            ).format(
+                data_summary=data_summary,
+                problem_description=problem_description,
+                domain_context=domain_context or "",
+            )
+            
+            # Get initial insights
+            insights = self._query_llm_with_retry(context_prompt)
+            
+            # Refine insights with expert prompting
+            refined_insights = self._refine_insights(insights, data)
+            
+            return [DomainInsight.model_validate(insight) for insight in refined_insights]
+            
+        except Exception as e:
+            logger.error(f"Error in domain knowledge extraction: {str(e)}", exc_info=True)
+            raise
+    
+    def _generate_data_summary(self, data: pd.DataFrame, target_column: str) -> Dict[str, Any]:
+        """Generate a summary of the dataset for LLM context."""
+        return {
+            "n_samples": len(data),
+            "n_features": len(data.columns) - 1,
+            "feature_types": {col: str(dtype) for col, dtype in data.dtypes.items()},
+            "missing_values": data.isnull().sum().to_dict(),
+            "target_distribution": data[target_column].describe().to_dict(),
+        }
+    
+    def _query_llm_with_retry(self, prompt: str, max_retries: int = 3) -> List[Dict[str, Any]]:
+        """Query LLM with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=self.temperature,
+                )
+                return self._parse_llm_response(response.choices[0].message.content)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                logger.warning(f"LLM query attempt {attempt + 1} failed: {str(e)}")
+    
+    def _refine_insights(
+        self,
+        initial_insights: List[Dict[str, Any]],
+        data: pd.DataFrame,
+    ) -> List[Dict[str, Any]]:
+        """Refine initial insights through expert prompting."""
+        # Implementation details for insight refinement
+        return initial_insights
+    
+    @staticmethod
+    def _parse_llm_response(response: str) -> List[Dict[str, Any]]:
+        """Parse LLM response into structured insights.
+        
+        Args:
+            response: Raw response string from LLM
+            
+        Returns:
+            List of dictionaries containing structured insights
+            
+        Raises:
+            ValueError: If response cannot be parsed into valid insights
+        """
+        try:
+            # First try to parse as direct JSON
+            try:
+                insights = json.loads(response)
+                if isinstance(insights, list):
+                    # Validate required fields
+                    required_fields = ["feature_name", "importance", "relationships", 
+                                     "suggested_transformations", "rationale"]
+                    for insight in insights:
+                        if not all(field in insight for field in required_fields):
+                            raise ValueError("Missing required fields")
+                    return insights
+            except json.JSONDecodeError:
+                pass
+            
+            # If not direct JSON, try to extract JSON-like structure from text
+            import re
+            json_pattern = r'\{[^{}]*\}'
+            matches = re.finditer(json_pattern, response)
+            insights = []
+            
+            for match in matches:
+                try:
+                    insight = json.loads(match.group())
+                    if all(key in insight for key in ["feature_name", "importance", "relationships", 
+                                                    "suggested_transformations", "rationale"]):
+                        insights.append(insight)
+                except json.JSONDecodeError:
+                    continue
+            
+            if not insights:
+                raise ValueError("No valid insights found in LLM response")
+            
+            # Validate and clean insights
+            cleaned_insights = []
+            for insight in insights:
+                cleaned_insight = {
+                    "feature_name": str(insight["feature_name"]),
+                    "importance": float(insight["importance"]),
+                    "relationships": [str(r) for r in insight["relationships"]],
+                    "suggested_transformations": [str(t) for t in insight["suggested_transformations"]],
+                    "rationale": str(insight["rationale"])
+                }
+                cleaned_insights.append(cleaned_insight)
+            
+            return cleaned_insights
+            
+        except Exception as e:
+            logger.error(f"Failed to parse LLM response: {str(e)}")
+            raise ValueError(f"Could not parse LLM response: {str(e)}")
+    
+    @staticmethod
+    def _default_prompt_config() -> PromptConfig:
+        """Create default prompt configuration with templates for domain knowledge extraction.
+        
+        Returns:
+            PromptConfig with default templates
+        """
+        context_template = """
+        You are an expert data scientist analyzing a dataset with the following characteristics:
+        {data_summary}
+        
+        The machine learning problem is:
+        {problem_description}
+        
+        Additional domain context:
+        {domain_context}
+        
+        Please analyze each feature and provide insights in the following JSON format:
+        [
+            {{
+                "feature_name": "name_of_feature",
+                "importance": 0.0-1.0,
+                "relationships": ["related_feature1", "related_feature2"],
+                "suggested_transformations": ["transformation1", "transformation2"],
+                "rationale": "Detailed explanation of why these transformations would be useful"
+            }}
+        ]
+        
+        Focus on:
+        1. Identifying potential feature interactions
+        2. Suggesting appropriate transformations (log, polynomial, binning, etc.)
+        3. Explaining the domain relevance of each feature
+        4. Noting any data quality concerns
+        
+        Provide concrete, actionable insights that can be used for feature engineering.
+        """
+        
+        expert_template = """
+        Review and enhance the following feature insights:
+        {initial_insights}
+        
+        Consider:
+        1. Are the suggested transformations appropriate for the data types?
+        2. Are there any missing important feature interactions?
+        3. Are the importance scores well-justified?
+        4. Could any domain-specific transformations improve the features?
+        
+        Provide refined insights in the same JSON format.
+        """
+        
+        feature_suggestion_template = """
+        Based on the domain knowledge and data characteristics:
+        {domain_context}
+        {data_summary}
+        
+        Suggest additional derived features that could be valuable, considering:
+        1. Common domain-specific indicators or ratios
+        2. Temporal patterns or seasonality
+        3. Categorical feature combinations
+        4. Text-derived features
+        
+        Provide suggestions in the standard JSON format.
+        """
+        
+        validation_template = """
+        Validate the following feature engineering suggestions:
+        {suggested_features}
+        
+        Check for:
+        1. Statistical validity of transformations
+        2. Potential data leakage
+        3. Computational feasibility
+        4. Business logic consistency
+        
+        Return a filtered list of valid suggestions in the standard JSON format.
+        """
+        
+        return PromptConfig(
+            context_template=context_template,
+            expert_template=expert_template,
+            feature_suggestion_template=feature_suggestion_template,
+            validation_template=validation_template,
+        ) 
