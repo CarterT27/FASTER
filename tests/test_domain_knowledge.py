@@ -152,13 +152,16 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
     assert len(insights) == 2
     assert mock_client.chat.completions.create.call_count == 1
     
-    # Update the assertion to use assert_called_with_any_args or check only specific arguments
-    call_args = mock_client.chat.completions.create.call_args
-    assert call_args[1]['model'] == "deepseek/deepseek-chat:free"
-    assert call_args[1]['messages'] == [{"role": "user", "content": "test prompt"}]
-    assert call_args[1]['temperature'] == 0.0
-    # Verify extra_headers exists but don't check specific values to make the test more robust
-    assert 'extra_headers' in call_args[1]
+    # Verify correct API call including expected headers
+    mock_client.chat.completions.create.assert_called_with(
+        model="deepseek/deepseek-chat:free",
+        messages=[{"role": "user", "content": "test prompt"}],
+        temperature=0.0,
+        extra_headers={
+            "HTTP-Referer": "https://github.com/cartertran/faster",
+            "X-Title": "FASTER Feature Selection Tool"
+        }
+    )
 
 @patch('openai.OpenAI')
 def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
