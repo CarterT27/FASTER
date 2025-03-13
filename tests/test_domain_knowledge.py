@@ -158,7 +158,7 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
         messages=[{"role": "user", "content": "test prompt"}],
         temperature=0.0,
         extra_headers={
-            "HTTP-Referer": "https://github.com/cartertran/faster",
+            "HTTP-Referer": "https://github.com/CarterT27/FASTER",
             "X-Title": "FASTER Feature Selection Tool"
         }
     )

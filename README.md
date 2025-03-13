@@ -62,7 +62,7 @@ These improvements have significantly enhanced the framework's ability to genera
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/FASTER.git
+git clone https://github.com/CarterT27/FASTER.git
 cd FASTER
 
 # Install dependencies using Rye
@@ -76,7 +76,7 @@ rye sync
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/FASTER.git
+git clone https://github.com/CarterT27/FASTER.git
 cd FASTER
 
 # Create and activate a virtual environment

@@ -172,7 +172,7 @@ def configure_openai_client(api_key: str) -> openai.OpenAI:
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
         default_headers={
-            "HTTP-Referer": "https://github.com/jordanott/FASTER",  # Project repository
+            "HTTP-Referer": "https://github.com/CarterT27/FASTER",  # Project repository
             "X-Title": "FASTER Integration Tests",
         }
     )

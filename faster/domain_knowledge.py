@@ -169,7 +169,7 @@ class DomainKnowledgeExtractor:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=self.temperature,
                     extra_headers={
-                        "HTTP-Referer": "https://github.com/cartertran/faster",  # For rankings
+                        "HTTP-Referer": "https://github.com/CarterT27/FASTER",  # For rankings
                         "X-Title": "FASTER Feature Selection Tool",  # For rankings
                     }
                 )

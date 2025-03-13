@@ -17,7 +17,7 @@ try:
         url="https://openrouter.ai/api/v1/chat/completions",
         headers={
             "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com/cartertran/faster",
+            "HTTP-Referer": "https://github.com/CarterT27/FASTER",
             "X-Title": "FASTER Test",
             "Content-Type": "application/json"
         },
