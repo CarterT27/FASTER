@@ -1,5 +1,7 @@
 # FASTER: Feature Automation, Selection, Transformation, Extraction Routine
 
+by: Carter Tran, Suchit Bhayani
+
 FASTER is a Python framework designed to leverage Large Language Models (LLMs) for automating feature engineering in machine learning workflows. The system incorporates domain knowledge to generate, transform, and select optimal features, significantly reducing the manual effort typically required in feature engineering while improving model performance.
 
 ## Features
