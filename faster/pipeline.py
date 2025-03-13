@@ -136,6 +136,7 @@ class Pipeline:
                 data,
                 domain_insights,
                 target_column,
+                is_classification,
             )
             
             if self.config.save_intermediate:

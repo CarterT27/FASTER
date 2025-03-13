@@ -6,6 +6,7 @@ import logging
 import uuid
 import json
 import os
+import time
 
 import pandas as pd
 from openai import OpenAI
@@ -44,6 +45,7 @@ class DomainKnowledgeExtractor:
         model_name: str = "deepseek/deepseek-chat:free",
         temperature: float = 0.0,
         prompt_config: Optional[PromptConfig] = None,
+        api_key: Optional[str] = None,
     ):
         """Initialize the domain knowledge extractor.
         
@@ -51,23 +53,35 @@ class DomainKnowledgeExtractor:
             model_name: Name of the LLM model to use
             temperature: Temperature for LLM sampling
             prompt_config: Custom prompt configuration
+            api_key: OpenRouter API key (overrides environment variable if provided)
         """
-        if "OPENROUTER_API_KEY" not in os.environ:
+        # Use provided API key or get from environment
+        if api_key:
+            self.api_key = api_key.strip()
+        elif "OPENROUTER_API_KEY" in os.environ:
+            self.api_key = os.environ["OPENROUTER_API_KEY"].strip()
+        else:
             raise ValueError(
-                "OPENROUTER_API_KEY environment variable is required. "
+                "OPENROUTER_API_KEY environment variable is required or api_key must be provided. "
                 "Get your API key from https://openrouter.ai/keys"
             )
+            
+        if not self.api_key:
+            raise ValueError("API key is empty")
 
         self.model_name = model_name
         self.temperature = temperature
+        
+        # Configure OpenRouter client with API key
         self.client = OpenAI(
+            api_key=self.api_key,
             base_url="https://openrouter.ai/api/v1",
-            api_key=os.environ["OPENROUTER_API_KEY"],
             default_headers={
-                "HTTP-Referer": "https://github.com/cartertran/faster",  # Your project's website
-                "X-Title": "FASTER Framework",  # Your project's name
+                "HTTP-Referer": "https://github.com/cartertran/faster",
+                "X-Title": "FASTER Framework"
             }
         )
+        
         self.prompt_config = prompt_config or self._default_prompt_config()
         self._conversation_history: List[BaseMessage] = []
     
@@ -134,16 +148,52 @@ class DomainKnowledgeExtractor:
         """Query LLM with retry logic."""
         for attempt in range(max_retries):
             try:
+                logger.info(f"Querying LLM (attempt {attempt+1}/{max_retries})")
+                
+                # Log API configuration (with masked key)
+                api_key = self.client.api_key
+                # Handle both string keys and mock objects
+                if isinstance(api_key, str):
+                    masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
+                    logger.debug(f"Using API key: {masked_key} (length: {len(api_key)})")
+                else:
+                    logger.debug(f"Using API key: [MOCK OBJECT]")
+                
+                logger.debug(f"Base URL: {self.client.base_url}")
+                logger.debug(f"Model: {self.model_name}")
+                
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=self.temperature,
+                    temperature=self.temperature
                 )
+                
+                logger.info(f"LLM query successful")
                 return self._parse_llm_response(response.choices[0].message.content)
             except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"LLM query attempt {attempt + 1} failed: {error_msg}")
+                
+                # Add more detailed error information
+                if hasattr(e, 'response'):
+                    status_code = getattr(e.response, 'status_code', 'unknown')
+                    logger.warning(f"Status code: {status_code}")
+                    
+                    # Try to extract response body
+                    try:
+                        response_text = e.response.text
+                        logger.warning(f"Response body: {response_text}")
+                    except:
+                        pass
+                
                 if attempt == max_retries - 1:
+                    logger.error(f"All {max_retries} LLM query attempts failed")
                     raise
-                logger.warning(f"LLM query attempt {attempt + 1} failed: {str(e)}")
+                
+                # Exponential backoff
+                wait_time = 2 ** attempt
+                logger.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
     
     def _refine_insights(
         self,

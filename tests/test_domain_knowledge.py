@@ -53,7 +53,20 @@ def mock_llm_response():
 def domain_extractor():
     """Create a DomainKnowledgeExtractor instance."""
     with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'dummy_key'}):
-        return DomainKnowledgeExtractor()
+        # Use a mock to avoid actual API calls
+        with patch('openai.OpenAI') as mock_openai:
+            # Create a mock client with appropriate attributes
+            mock_client = Mock()
+            # Set api_key to a string to avoid TypeError in _query_llm_with_retry
+            mock_client.api_key = ""
+            # Set base_url to a string to avoid attribute errors
+            mock_client.base_url = "https://openrouter.ai/api/v1"
+            mock_openai.return_value = mock_client
+            
+            extractor = DomainKnowledgeExtractor()
+            # Replace the client to avoid actual API calls
+            extractor.client = mock_client
+            return extractor
 
 def test_init_without_api_key():
     """Test initialization without API key."""
@@ -139,9 +152,9 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
     assert len(insights) == 2
     assert mock_client.chat.completions.create.call_count == 1
     
-    # Verify correct API call
+    # Verify correct API call without checking headers (they're in default_headers)
     mock_client.chat.completions.create.assert_called_with(
-        model="deepseek/deepseek-chat:free",  # Updated model name
+        model="deepseek/deepseek-chat:free",
         messages=[{"role": "user", "content": "test prompt"}],
         temperature=0.0
     )

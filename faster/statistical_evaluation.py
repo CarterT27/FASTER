@@ -9,6 +9,11 @@ import pandas as pd
 from scipy import stats
 from sklearn.feature_selection import mutual_info_regression, mutual_info_classif
 from statsmodels.stats.multitest import multipletests
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import roc_auc_score, r2_score
+from sklearn.model_selection import cross_val_score, KFold, StratifiedKFold
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.linear_model import LogisticRegression, LinearRegression
 
 from faster.utils.logging import get_logger
 from faster.utils.validation import validate_dataframe
@@ -27,6 +32,7 @@ class FeatureStatistics:
     test_method: str
     assumptions_met: Dict[str, bool]
     warnings: List[str]
+    predictive_power: Optional[float] = None  # Added measure of univariate predictive power
 
 class StatisticalEvaluator:
     """Evaluates statistical significance of features."""
@@ -66,6 +72,16 @@ class StatisticalEvaluator:
         
         try:
             categorical_columns = categorical_columns or []
+            
+            # Auto-detect categorical columns if not provided
+            if not categorical_columns:
+                categorical_columns = self._detect_categorical_columns(data)
+                logger.info(f"Auto-detected categorical columns: {categorical_columns}")
+            
+            # Determine if this is a classification problem
+            is_classification = self._is_classification_problem(data[target_column])
+            logger.info(f"Problem type: {'Classification' if is_classification else 'Regression'}")
+            
             results = []
             
             # Evaluate each feature
@@ -76,11 +92,15 @@ class StatisticalEvaluator:
                         data[target_column],
                         column,
                         column in categorical_columns,
+                        is_classification,
                     )
                     results.append(stats)
             
             # Apply multiple testing correction
             self._apply_multiple_testing_correction(results)
+            
+            # Add predictive power assessment
+            self._evaluate_predictive_power(data, target_column, results, is_classification)
             
             return results
             
@@ -94,25 +114,41 @@ class StatisticalEvaluator:
         target: pd.Series,
         feature_name: str,
         is_categorical: bool,
+        is_classification: bool,
     ) -> FeatureStatistics:
         """Evaluate statistical significance of a single feature."""
         assumptions = self._check_assumptions(feature, target, is_categorical)
         warnings = []
         
         # Choose appropriate test based on data characteristics
-        if is_categorical:
-            correlation, p_value, effect_size = self._categorical_test(feature, target)
+        if is_categorical and is_classification:
+            correlation, p_value, effect_size = self._categorical_vs_categorical(feature, target)
             test_method = "chi_square"
-        elif not assumptions["normality"]:
-            correlation, p_value, effect_size = self._nonparametric_test(feature, target)
-            test_method = "spearman"
-            warnings.append("Non-normal distribution detected, using non-parametric test")
-        else:
-            correlation, p_value, effect_size = self._parametric_test(feature, target)
-            test_method = "pearson"
+        elif is_categorical and not is_classification:
+            correlation, p_value, effect_size = self._categorical_vs_continuous(feature, target)
+            test_method = "anova"
+        elif not is_categorical and is_classification:
+            correlation, p_value, effect_size = self._continuous_vs_categorical(feature, target)
+            test_method = "point_biserial"
+        else:  # Both continuous
+            if not assumptions["normality"]:
+                correlation, p_value, effect_size = self._nonparametric_test(feature, target)
+                test_method = "spearman"
+                warnings.append("Non-normal distribution detected, using non-parametric test")
+            else:
+                correlation, p_value, effect_size = self._parametric_test(feature, target)
+                test_method = "pearson"
         
         # Calculate mutual information
         mi_score = self._calculate_mutual_information(feature, target, is_categorical)
+        
+        # Add warning for weak relationships
+        if effect_size < 0.1 and p_value <= self.alpha:
+            warnings.append(f"Statistically significant but small effect size ({effect_size:.3f})")
+        
+        # Add warning for high p-value but high mutual information
+        if p_value > self.alpha and mi_score > 0.2:
+            warnings.append(f"High mutual information but non-significant p-value, may indicate non-linear relationship")
         
         return FeatureStatistics(
             feature_name=feature_name,
@@ -164,7 +200,7 @@ class StatisticalEvaluator:
         effect_size = abs(correlation)
         return correlation, p_value, effect_size
     
-    def _categorical_test(
+    def _categorical_vs_categorical(
         self,
         feature: pd.Series,
         target: pd.Series,
@@ -172,8 +208,48 @@ class StatisticalEvaluator:
         """Perform categorical statistical test (Chi-square test)."""
         contingency = pd.crosstab(feature, target)
         chi2, p_value, dof, expected = stats.chi2_contingency(contingency)
-        effect_size = np.sqrt(chi2 / (len(feature) * (min(contingency.shape) - 1)))  # Cramer's V
+        n = contingency.sum().sum()
+        effect_size = np.sqrt(chi2 / (n * (min(contingency.shape) - 1)))  # Cramer's V
         return None, p_value, effect_size
+    
+    def _categorical_vs_continuous(
+        self,
+        feature: pd.Series,
+        target: pd.Series,
+    ) -> Tuple[float, float, float]:
+        """ANOVA for categorical feature vs continuous target."""
+        groups = []
+        for category in feature.unique():
+            group_values = target[feature == category].values
+            if len(group_values) > 0:
+                groups.append(group_values)
+        
+        if len(groups) <= 1:
+            return None, 1.0, 0.0
+            
+        f_stat, p_value = stats.f_oneway(*groups)
+        
+        # Calculate eta-squared as effect size
+        ss_between = sum(len(group) * (np.mean(group) - np.mean(target))**2 for group in groups)
+        ss_total = sum((target - np.mean(target))**2)
+        eta_squared = ss_between / ss_total if ss_total > 0 else 0
+        
+        return None, p_value, eta_squared
+    
+    def _continuous_vs_categorical(
+        self,
+        feature: pd.Series,
+        target: pd.Series,
+    ) -> Tuple[float, float, float]:
+        """Point-biserial correlation for continuous feature vs categorical target."""
+        # Convert target to numeric if it isn't already
+        target_numeric = pd.factorize(target)[0]
+        
+        # Calculate point-biserial correlation (equivalent to Pearson with binary variable)
+        correlation, p_value = stats.pointbiserialr(feature, target_numeric)
+        effect_size = abs(correlation)
+        
+        return correlation, p_value, effect_size
     
     def _calculate_mutual_information(
         self,
@@ -183,9 +259,14 @@ class StatisticalEvaluator:
     ) -> float:
         """Calculate mutual information score."""
         feature_reshaped = feature.values.reshape(-1, 1)
-        if is_categorical:
-            return mutual_info_classif(feature_reshaped, target, discrete_features=True)[0]
-        return mutual_info_regression(feature_reshaped, target)[0]
+        is_target_categorical = self._is_classification_problem(target)
+        
+        if is_target_categorical:
+            mi_func = mutual_info_classif
+        else:
+            mi_func = mutual_info_regression
+            
+        return mi_func(feature_reshaped, target, discrete_features=[is_categorical])[0]
     
     def _apply_multiple_testing_correction(self, results: List[FeatureStatistics]) -> None:
         """Apply multiple testing correction to p-values."""
@@ -199,29 +280,200 @@ class StatisticalEvaluator:
         for result, p_corrected in zip(results, p_corrected):
             result.p_value = p_corrected
     
+    def _evaluate_predictive_power(
+        self,
+        data: pd.DataFrame,
+        target_column: str,
+        results: List[FeatureStatistics],
+        is_classification: bool,
+    ) -> None:
+        """Evaluate univariate predictive power of each feature using cross-validation."""
+        target = data[target_column]
+        
+        # Set up cross-validation
+        cv = StratifiedKFold(n_splits=5) if is_classification else KFold(n_splits=5)
+        
+        for stat in results:
+            feature = stat.feature_name
+            X = data[[feature]].copy()
+            
+            # Skip features with too many missing values
+            if X.isnull().sum().sum() / len(X) > 0.2:
+                stat.predictive_power = 0.0
+                continue
+                
+            # Try to evaluate predictive power
+            try:
+                # Choose appropriate model
+                if is_classification:
+                    base_score = data[target_column].value_counts(normalize=True).max()  # Majority class frequency
+                    if self._is_categorical_feature(data[feature]):
+                        model = DecisionTreeClassifier(max_depth=3)
+                    else:
+                        model = LogisticRegression()
+                    
+                    # Use AUC for binary classification, accuracy for multiclass
+                    if len(target.unique()) == 2:
+                        scoring = 'roc_auc'
+                    else:
+                        scoring = 'accuracy'
+                else:
+                    base_score = 0.0  # R² of predicting the mean is 0
+                    if self._is_categorical_feature(data[feature]):
+                        model = DecisionTreeRegressor(max_depth=3)
+                    else:
+                        model = LinearRegression()
+                    scoring = 'r2'
+                
+                # Calculate cross-validated score
+                cv_scores = cross_val_score(model, X, target, cv=cv, scoring=scoring)
+                avg_score = np.mean(cv_scores)
+                
+                # Normalize score relative to baseline
+                if is_classification and scoring == 'accuracy':
+                    # For accuracy, measure improvement over majority class baseline
+                    normalized_score = (avg_score - base_score) / (1 - base_score) if avg_score > base_score else 0
+                elif is_classification and scoring == 'roc_auc':
+                    # For AUC, 0.5 is random baseline
+                    normalized_score = (avg_score - 0.5) / 0.5 if avg_score > 0.5 else 0
+                else:
+                    # For regression, negative R² is worse than baseline
+                    normalized_score = max(0, avg_score)
+                
+                # Cap normalized score at 1.0
+                stat.predictive_power = min(1.0, normalized_score)
+                
+            except Exception as e:
+                logger.warning(f"Error calculating predictive power for {feature}: {str(e)}")
+                stat.predictive_power = 0.0
+    
     @staticmethod
     def _check_normality(series: pd.Series) -> bool:
         """Check if data is normally distributed using Shapiro-Wilk test."""
-        if len(series) < 3:
+        # Use a sample for large datasets to avoid computational issues
+        sample = series.dropna()
+        if len(sample) > 5000:
+            sample = sample.sample(5000)
+            
+        if len(sample) < 3:
             return False
-        _, p_value = stats.shapiro(series)
-        return p_value > 0.05
+            
+        try:
+            _, p_value = stats.shapiro(sample)
+            return p_value > 0.05
+        except Exception:
+            # Fallback to checking skew and kurtosis
+            skew = abs(sample.skew())
+            kurtosis = abs(sample.kurtosis())
+            return skew < 1.0 and kurtosis < 3.0
     
     @staticmethod
     def _check_linearity(feature: pd.Series, target: pd.Series) -> bool:
-        """Check linearity assumption using Ramsey's RESET test."""
-        # Simplified version - checks if quadratic term improves fit
-        X = feature.values.reshape(-1, 1)
-        X2 = np.square(X)
-        linear_residuals = np.polyfit(X.flatten(), target, 1)[0]
-        quadratic_residuals = np.polyfit(X.flatten(), target, 2)[0]
-        return abs(linear_residuals - quadratic_residuals) < 0.1
+        """Check linearity assumption using augmented Ramsey RESET test."""
+        try:
+            # Simplified check using polynomial terms
+            X = feature.values.reshape(-1, 1)
+            X2 = np.power(X, 2)
+            X3 = np.power(X, 3)
+            
+            # Fit linear model
+            beta_linear = np.polyfit(X.flatten(), target, 1)
+            yhat_linear = np.polyval(beta_linear, X.flatten())
+            sse_linear = np.sum((target - yhat_linear)**2)
+            
+            # Fit polynomial model
+            X_poly = np.column_stack((X.flatten(), X2.flatten(), X3.flatten()))
+            beta_poly = np.linalg.lstsq(X_poly, target, rcond=None)[0]
+            yhat_poly = X_poly @ beta_poly
+            sse_poly = np.sum((target - yhat_poly)**2)
+            
+            # If polynomial significantly improves fit, relationship is non-linear
+            if sse_poly < 0.8 * sse_linear:  # 20% improvement threshold
+                return False
+                
+            return True
+            
+        except Exception:
+            return True  # Default to assuming linearity if test fails
     
     @staticmethod
     def _check_homoscedasticity(feature: pd.Series, target: pd.Series) -> bool:
-        """Check homoscedasticity using Breusch-Pagan test."""
-        # Simplified version - checks if residuals variance is constant
-        coeffs = np.polyfit(feature, target, 1)
-        residuals = target - np.polyval(coeffs, feature)
-        _, p_value = stats.spearmanr(feature, np.square(residuals))
-        return p_value > 0.05 
+        """Check homoscedasticity using Spearman correlation of residuals with feature."""
+        try:
+            # Fit a linear model
+            coeffs = np.polyfit(feature, target, 1)
+            predicted = np.polyval(coeffs, feature)
+            residuals = target - predicted
+            
+            # Check correlation between absolute residuals and feature
+            corr, p_value = stats.spearmanr(feature, np.abs(residuals))
+            
+            # If significant correlation, heteroscedasticity is present
+            return p_value > 0.05
+            
+        except Exception:
+            return True  # Default to assuming homoscedasticity if test fails
+    
+    @staticmethod
+    def _detect_categorical_columns(data: pd.DataFrame) -> List[str]:
+        """Automatically detect categorical columns in the dataset."""
+        categorical_cols = []
+        
+        for column in data.columns:
+            # Skip columns with too many missing values
+            if data[column].isnull().sum() / len(data) > 0.5:
+                continue
+                
+            # Check if column should be treated as categorical
+            if data[column].dtype == 'object' or data[column].dtype.name == 'category':
+                categorical_cols.append(column)
+            elif data[column].dtype in [np.int64, np.int32]:
+                # Integer columns with few unique values are likely categorical
+                unique_vals = data[column].nunique()
+                if unique_vals < min(10, len(data) * 0.05):  # 10 or 5% of rows, whichever is smaller
+                    categorical_cols.append(column)
+        
+        return categorical_cols
+    
+    @staticmethod
+    def _is_classification_problem(target: pd.Series) -> bool:
+        """Determine if target variable represents a classification problem."""
+        # Check if target is categorical or numeric with few unique values
+        if target.dtype == 'object' or target.dtype.name == 'category':
+            return True
+            
+        # For numeric targets, check number of unique values
+        unique_count = target.nunique()
+        
+        # If very few unique values, likely classification
+        if unique_count <= 10:
+            return True
+            
+        # If many unique values and numeric, likely regression
+        if unique_count > min(100, len(target) * 0.1) and pd.api.types.is_numeric_dtype(target):
+            return False
+            
+        # Look at distribution of values
+        # Classification targets often have peaks at certain values
+        value_counts = target.value_counts(normalize=True)
+        # If any value appears with high frequency, likely classification
+        if value_counts.iloc[0] > 0.3:  # Any class represents > 30% of data
+            return True
+            
+        # Default to regression for numerical targets
+        return False
+    
+    @staticmethod
+    def _is_categorical_feature(feature: pd.Series) -> bool:
+        """Determine if a feature should be treated as categorical."""
+        if feature.dtype == 'object' or feature.dtype.name == 'category':
+            return True
+            
+        # For numeric features, check number of unique values
+        unique_count = feature.nunique()
+        
+        # If very few unique values, likely categorical
+        if unique_count <= min(10, len(feature) * 0.05):
+            return True
+            
+        return False 

@@ -10,15 +10,124 @@ FASTER is a Python framework designed to leverage Large Language Models (LLMs) f
 - Integration with OpenRouter API for LLM access
 - Robust error handling and logging
 - Detailed feature metadata and documentation
+- Type-safe implementation with comprehensive test coverage
+- Configurable pipeline with sensible defaults
+- Extensive documentation and examples
+
+## Requirements
+
+- Python 3.9+
+- [Rye](https://github.com/astral-sh/rye) (recommended) or pip
+- OpenRouter API key for LLM access
+
+## Recent Improvements
+
+The FASTER framework has undergone several key improvements to address performance issues and enhance feature engineering capabilities:
+
+### Enhanced Feature Selection
+
+- **Cross-Validation Feature Importance**: Now uses cross-validation to calculate more robust feature importance scores
+- **Stability Selection**: Implements stability selection to identify consistently important features across bootstrapped samples
+- **Variance Inflation Factor (VIF)**: Added checks for multicollinearity to reduce redundancy
+- **Minimum Importance Threshold**: Features below a minimum importance score are automatically filtered out
+
+### Smarter Feature Generation
+
+- **Performance-Based Feature Filtering**: Generated features are evaluated for their utility and only beneficial transformations are kept
+- **Transformation Prioritization**: Features are prioritized based on domain importance
+- **Reduced Correlation Threshold**: Decreased from 0.9 to 0.8 to be more aggressive with correlated features
+- **Limited Transformation Counts**: Controls the number of each transformation type to prevent feature explosion
+- **Performance Gain Tracking**: Each transformation is tracked for its contribution to model performance
+
+### Improved Statistical Evaluation
+
+- **Enhanced Variable Type Handling**: Better detection and processing of categorical vs. continuous variables
+- **Predictive Power Assessment**: Individual features are evaluated for their predictive power
+- **Automatic Categorical Detection**: More sophisticated detection of categorical columns
+- **Robust Statistical Testing**: Tests are selected based on data characteristics
+
+### Domain Knowledge Integration
+
+- **Selective Transformation Application**: More selective about which transformations to apply based on domain insights
+- **Top Feature Focus**: Concentrates transformations on features identified as most important by domain knowledge
+- **Explicit Transformation Recommendations**: Better utilization of specific transformation suggestions
+
+These improvements have significantly enhanced the framework's ability to generate features that actually improve model performance, while reducing noise from unhelpful transformations.
 
 ## Installation
 
+### Using Rye (Recommended)
+
 ```bash
-# Using rye (recommended)
+# Clone the repository
+git clone https://github.com/yourusername/FASTER.git
+cd FASTER
+
+# Install dependencies using Rye
 rye sync
 
-# Using pip
+# Activate the virtual environment
+. .venv/bin/activate
+```
+
+### Using pip
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/FASTER.git
+cd FASTER
+
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows, use `.venv\Scripts\activate`
+
+# Install dependencies
 pip install -e .
+```
+
+## Environment Setup
+
+1. Copy the example environment file:
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` with your configuration:
+```env
+OPENROUTER_API_KEY=your_api_key_here
+LOG_LEVEL=INFO
+CACHE_DIR=.cache
+```
+
+## Project Structure
+
+```
+FASTER/
+├── faster/                    # Main package directory
+│   ├── __init__.py           # Package initialization
+│   ├── domain_knowledge.py   # Domain knowledge extraction
+│   ├── feature_generation.py # Feature generation and transformation
+│   ├── statistical_eval.py   # Statistical testing
+│   ├── feature_selection.py  # Feature selection
+│   ├── pipeline.py          # Main pipeline orchestration
+│   └── utils/               # Utility functions
+│       ├── __init__.py
+│       ├── logging.py
+│       └── validation.py
+├── tests/                    # Test directory
+│   ├── __init__.py
+│   ├── conftest.py
+│   └── test_*.py            # Test modules
+├── data/                     # Data directory
+│   ├── raw/                 # Raw data
+│   └── processed/           # Processed data
+├── examples/                 # Example notebooks and scripts
+├── docs/                    # Documentation
+├── .env                     # Environment variables
+├── .gitignore              # Git ignore rules
+├── pyproject.toml          # Project configuration
+├── requirements.lock       # Locked dependencies
+└── README.md              # This file
 ```
 
 ## Quick Start
@@ -30,8 +139,29 @@ import pandas as pd
 # Load your data
 data = pd.read_csv("your_data.csv")
 
-# Initialize pipeline
-pipeline = Pipeline()
+# Initialize pipeline with custom configuration
+from faster.pipeline import PipelineConfig
+from faster.feature_selection import SelectionCriteria
+
+config = PipelineConfig(
+    model_name="deepseek/deepseek-chat:free",
+    temperature=0.0,
+    max_interaction_degree=2,
+    alpha=0.05,
+    selection_criteria=SelectionCriteria(
+        p_value_threshold=0.05,
+        min_effect_size=0.1,
+        max_correlation=0.8,
+        min_importance_score=0.02,
+        vif_threshold=10.0,
+        cv_folds=5,
+        stability_threshold=0.7,
+    ),
+    output_dir="results",
+    save_intermediate=True,
+)
+
+pipeline = Pipeline(config)
 
 # Run feature engineering
 result = pipeline.run(
@@ -39,6 +169,7 @@ result = pipeline.run(
     target_column="target",
     problem_description="Predict customer churn based on usage patterns",
     categorical_columns=["plan_type", "region"],
+    domain_context="Telecommunications industry with monthly subscription model",
     is_classification=True,
 )
 
@@ -46,116 +177,212 @@ result = pipeline.run(
 transformed_data = result.transformed_data
 selected_features = result.selected_features
 feature_metadata = result.feature_metadata
+
+# See performance metrics and feature importance
+print(f"Selected {len(selected_features)} features")
+for feature, metadata in feature_metadata.items():
+    print(f"{feature}: importance={metadata.get('importance_score', 0):.4f}")
+    if 'transformation' in metadata and metadata['transformation']:
+        print(f"  - Transformation: {metadata['transformation'].get('transformation_type', '')}")
+        print(f"  - Performance gain: {metadata['transformation'].get('performance_gain', 'N/A')}")
 ```
 
-## Project Structure
+## Feature Generation Types
 
-```
-faster/
-├── __init__.py                 # Package initialization
-├── domain_knowledge.py         # Domain knowledge extraction
-├── feature_generation.py       # Feature generation and transformation
-├── statistical_evaluation.py   # Statistical testing
-├── feature_selection.py        # Feature selection
-├── pipeline.py                # Main pipeline orchestration
-└── utils/                     # Utility functions
-    ├── __init__.py
-    ├── logging.py
-    └── validation.py
-```
+FASTER implements a comprehensive set of feature transformations, automatically selecting and applying the most appropriate ones based on data characteristics and domain knowledge. Each transformation is tracked with metadata including original features, parameters, and rationale.
 
-## Configuration
+### Performance-Based Transformation Evaluation
 
-The pipeline can be configured through the `PipelineConfig` class:
+A key improvement in FASTER is the performance-based evaluation of transformations:
 
-```python
-from faster import Pipeline
-from faster.pipeline import PipelineConfig
-from faster.feature_selection import SelectionCriteria
+- **Transformation Utility Assessment**: Each transformation is evaluated for its contribution to model performance
+- **Baseline Comparison**: Transformed features are compared against a baseline model with original features
+- **Selective Retention**: Only transformations that improve performance beyond a threshold are kept
+- **Performance Gain Tracking**: Each transformation is annotated with its quantified performance contribution
+- **Group Evaluation**: Transformations of similar types are evaluated together for efficiency
 
-config = PipelineConfig(
-    model_name="gpt-4",
-    temperature=0.0,
-    max_interaction_degree=2,
-    alpha=0.05,
-    selection_criteria=SelectionCriteria(
-        p_value_threshold=0.05,
-        min_effect_size=0.1,
-        max_correlation=0.9,
-    ),
-    output_dir="results",
-    save_intermediate=True,
-)
+### Basic Numerical Transformations
+- **Log Transform**: Applied to skewed features (`log_*`)
+  - Automatic detection based on skewness > 1.0
+  - Uses `np.log1p` for handling zero values
+- **Standard Scaling**: Standardization of features (`scaled_*`)
+  - Zero mean and unit variance
+  - Tracked with individual scalers per feature
 
-pipeline = Pipeline(config)
-```
+### Statistical Transformations
+- **Z-Score**: Standardization using mean and standard deviation (`zscore_*`)
+- **Min-Max Scaling**: Scale features to [0,1] range (`minmax_*`)
+- **Box-Cox**: Power transformation for positive data (`boxcox_*`)
+- **Yeo-Johnson**: Power transformation supporting negative values (`yeojohnson_*`)
+- **Quantile**: Transform to normal distribution (`quantile_*`)
+- **Binning**: Equal-frequency binning with customizable bins (`binned_*`)
+  - Default: 5 bins
+  - Supports custom bin counts
 
-## Feature Generation
+### Advanced Mathematical Transformations
+- **Power**: Raise features to specified power (`power_*`)
+  - Default power: 2
+  - Configurable power parameter
+- **Square**: Square transformation (`square_*`)
+- **Cube**: Cubic transformation (`cube_*`)
+- **Square Root**: For non-negative features (`sqrt_*`)
+- **Logit**: Transform probabilities to log-odds (`logit_*`)
+  - Handles values in [0,1] range
+  - Uses epsilon adjustment for numerical stability
+- **Sigmoid**: Logistic function transformation (`sigmoid_*`)
 
-FASTER supports various feature transformation types:
+### Signal Processing Transformations
+- **Detrend**: Remove linear trends (`detrend_*`)
+- **Savitzky-Golay**: Smoothing filter (`savgol_*`)
+  - Configurable window size
+  - Polynomial order: 3
+- **Hilbert**: Complex envelope detection (`hilbert_*`)
+  - Extracts amplitude envelope
 
-- Basic transformations (scaling, normalization)
-- Interaction features
-- Domain-specific transformations
-- Text feature extraction
-- Time-based features
+### Interaction Features
+- **Multiplicative**: Pairwise multiplication (`multiply_*`)
+  - Based on domain knowledge relationships
+  - Automatic generation for related features
+- **Differences**: Feature subtraction (`diff_*`)
+  - Generated between related features
+- **Ratios**: Feature division (`ratio_*`)
+  - Includes zero-division protection
 
-## Statistical Evaluation
+### Text Features
+- **TF-IDF**: Term frequency-inverse document frequency (`tfidf_*`)
+  - Maximum 10 features per text column
+  - Automatic text column detection
+  - Handles missing values
+- **Text Detection**: Intelligent text column identification
+  - Minimum 3 words per entry
+  - Sampling for efficiency
 
-Features are evaluated using:
+### Domain-Specific Features
+- Generated based on `DomainInsight` suggestions
+- Custom transformations based on domain expertise
+- Tracked with transformation metadata including rationale
 
-- Correlation analysis
-- Effect size calculation
-- Statistical significance testing
-- Mutual information scores
-- Multiple testing correction
-
-## Feature Selection
-
-Selection criteria include:
-
-- Statistical significance
-- Effect size
-- Mutual information
-- Feature importance from ML models
-- Correlation analysis
-
-## Output
-
-The pipeline generates:
-
-- Transformed dataset
-- Feature importance scores
-- Statistical metrics
-- Feature metadata
-- Execution logs
+Each transformation includes:
+- Comprehensive error handling and logging
+- Transformation metadata tracking
+- Input validation and preprocessing
+- Automatic feature naming
+- Performance optimization
 
 ## Development
+
+### Setting Up Development Environment
 
 ```bash
 # Install development dependencies
 rye sync --dev
 
-# Run tests
-pytest
-
-# Run linting
-ruff check .
+# Install pre-commit hooks
+pre-commit install
 ```
 
-## Requirements
+### Code Style and Quality
 
-- Python 3.9+
-- Dependencies listed in pyproject.toml
+We use the following tools to maintain code quality:
 
-## License
+- **Ruff**: For fast Python linting
+- **Black**: For code formatting
+- **MyPy**: For static type checking
+- **Pre-commit**: For automated checks before commits
 
-MIT License
+```bash
+# Run linting
+ruff check .
+
+# Run type checking
+mypy .
+
+# Run formatters
+black .
+```
+
+### Testing
+
+We use pytest for testing. Tests are located in the `tests/` directory and mirror the main package structure.
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_feature_generation.py
+
+# Run with coverage report
+pytest --cov=faster
+```
+
+The test suite includes both unit tests for individual components and integration tests that verify the end-to-end pipeline with real datasets (Titanic and Iris). These integration tests ensure that our feature engineering actually improves model performance in typical scenarios.
+
+Tests have been updated to accommodate recent improvements in the framework, particularly around:
+
+1. The more selective approach to feature transformation
+2. Performance-based feature evaluation
+3. Cross-validation for feature importance
+4. Stability selection for consistent feature importance
+
+This ensures that the tests validate the framework's ability to:
+- Generate useful transformations while filtering out noise
+- Apply domain knowledge appropriately
+- Handle both classification and regression tasks
+- Work with small and medium-sized datasets efficiently
+
+### Logging
+
+FASTER uses Python's built-in logging module with enhanced formatting:
+
+- **DEBUG**: Detailed information for debugging
+- **INFO**: General information about pipeline progress
+- **WARNING**: Warnings about potential issues
+- **ERROR**: Errors that don't halt execution
+- **CRITICAL**: Critical errors that stop execution
+
+Configure logging level in `.env` or programmatically:
+
+```python
+import logging
+logging.getLogger("faster").setLevel(logging.DEBUG)
+```
+
+## Error Handling
+
+FASTER provides custom exceptions for different error categories:
+
+- `FasterValidationError`: Input validation errors
+- `FasterConfigError`: Configuration errors
+- `FasterAPIError`: External API communication errors
+- `FasterTransformError`: Feature transformation errors
+- `FasterStatisticalError`: Statistical evaluation errors
+
+All exceptions include detailed context information for debugging.
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run tests and linting
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Create a Pull Request
+
+### Pull Request Guidelines
+
+- Include tests for new functionality
+- Update documentation as needed
+- Follow the existing code style
+- Keep changes focused and atomic
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Acknowledgments
+
+- OpenRouter for LLM API access
+- The scikit-learn community for statistical tools
+- The Python data science community
