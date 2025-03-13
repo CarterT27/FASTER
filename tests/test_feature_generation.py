@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from unittest.mock import Mock
 from sklearn.preprocessing import StandardScaler
+from scipy import stats, signal, special
 
 from faster.feature_generation import FeatureGenerator, TransformationMetadata
 from faster.domain_knowledge import DomainInsight
@@ -278,4 +279,127 @@ def test_transformation_metadata(feature_generator, sample_data, sample_insights
         assert isinstance(metadata.transformation_type, str)
         assert isinstance(metadata.parameters, dict)
         assert isinstance(metadata.rationale, str)
-        assert all(feat in sample_data.columns for feat in metadata.original_features) 
+        assert all(feat in sample_data.columns for feat in metadata.original_features)
+
+def test_scipy_transformations(feature_generator):
+    """Test scipy-based transformations."""
+    # Create test data with clear patterns for transformations
+    x = np.linspace(0, 10, 100)
+    np.random.seed(42)  # Set seed for reproducibility
+    
+    # Generate uniform values between 0.01 and 0.99
+    uniform_values = np.random.uniform(0.01, 0.99, 100)
+    print(f"\nUniform values range: [{uniform_values.min():.6f}, {uniform_values.max():.6f}]")
+    
+    test_data = pd.DataFrame({
+        'positive': np.exp(x/5),  # For Box-Cox
+        'any_value': x - 5,  # For Yeo-Johnson
+        'uniform': uniform_values,  # For logit, avoid exact 0/1
+        'trend': x + np.random.normal(0, 0.1, 100),  # For detrend
+        'noisy': np.sin(x) + np.random.normal(0, 0.1, 100),  # For Savitzky-Golay
+        'oscillating': np.sin(x) + np.cos(2*x),  # For Hilbert
+    })
+    
+    print(f"Uniform column range: [{test_data['uniform'].min():.6f}, {test_data['uniform'].max():.6f}]")
+    
+    # Verify test data is correctly set up
+    assert (test_data['uniform'] > 0).all(), "Uniform values must be positive"
+    assert (test_data['uniform'] < 1).all(), "Uniform values must be less than 1"
+    
+    test_insights = [
+        DomainInsight(
+            feature_name="positive",
+            importance=0.8,
+            relationships=[],
+            suggested_transformations=["boxcox", "yeojohnson"],
+            rationale="Test scipy.stats transformations"
+        ),
+        DomainInsight(
+            feature_name="any_value",
+            importance=0.7,
+            relationships=[],
+            suggested_transformations=["yeojohnson", "quantile"],
+            rationale="Test more scipy.stats transformations"
+        ),
+        DomainInsight(
+            feature_name="uniform",
+            importance=0.6,
+            relationships=[],
+            suggested_transformations=["logit", "expit"],
+            rationale="Test scipy.special transformations"
+        ),
+        DomainInsight(
+            feature_name="trend",
+            importance=0.5,
+            relationships=[],
+            suggested_transformations=["detrend"],
+            rationale="Test signal.detrend"
+        ),
+        DomainInsight(
+            feature_name="noisy",
+            importance=0.4,
+            relationships=[],
+            suggested_transformations=["savgol"],
+            rationale="Test Savitzky-Golay filter"
+        ),
+        DomainInsight(
+            feature_name="oscillating",
+            importance=0.3,
+            relationships=[],
+            suggested_transformations=["hilbert"],
+            rationale="Test Hilbert transform"
+        ),
+    ]
+    
+    result = feature_generator._apply_domain_transformations(test_data, test_insights)
+    print("\nResult DataFrame columns:", result.columns.tolist())
+    print("\nTransformations recorded:", list(feature_generator.transformations.keys()))
+    
+    # Test scipy.stats transformations
+    assert "boxcox_positive" in result.columns
+    assert "yeojohnson_positive" in result.columns
+    assert "yeojohnson_any_value" in result.columns
+    assert "quantile_any_value" in result.columns
+    
+    # Test scipy.special transformations
+    assert "logit_uniform" in result.columns, "Logit transformation was not applied"
+    assert "sigmoid_uniform" in result.columns
+    
+    # Test scipy.signal transformations
+    assert "detrend_trend" in result.columns
+    assert "savgol_noisy" in result.columns
+    assert "hilbert_oscillating" in result.columns
+    
+    # Verify transformations are tracked
+    assert all(col in feature_generator.transformations for col in [
+        "boxcox_positive",
+        "yeojohnson_positive",
+        "yeojohnson_any_value",
+        "quantile_any_value",
+        "logit_uniform",
+        "sigmoid_uniform",
+        "detrend_trend",
+        "savgol_noisy",
+        "hilbert_oscillating"
+    ])
+    
+    # Test statistical properties
+    # Box-Cox should reduce skewness
+    assert abs(stats.skew(result["boxcox_positive"])) < abs(stats.skew(test_data["positive"]))
+    
+    # Detrended data should have mean close to zero
+    assert abs(result["detrend_trend"].mean()) < 0.1
+    
+    # Savitzky-Golay should reduce noise (lower variance)
+    assert result["savgol_noisy"].var() < test_data["noisy"].var()
+    
+    # Hilbert transform envelope should be non-negative
+    assert (result["hilbert_oscillating"] >= 0).all()
+    
+    # Logit should map (0,1) to (-inf,inf)
+    assert result["logit_uniform"].min() < -5
+    assert result["logit_uniform"].max() > 5
+    
+    # Sigmoid should map values to (0,1)
+    assert (result["sigmoid_uniform"] > 0).all()
+    assert (result["sigmoid_uniform"] < 1).all() 

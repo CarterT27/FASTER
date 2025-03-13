@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
+from scipy import stats, signal, special
 
 from faster.utils.logging import get_logger
 from faster.domain_knowledge import DomainInsight
@@ -159,39 +160,111 @@ class FeatureGenerator:
             DataFrame with domain-specific transformations applied
         """
         result_df = data.copy()
+        logger.info("Starting domain transformations")
+        logger.info(f"Input columns: {data.columns.tolist()}")
         
         for insight in insights:
             feature = insight.feature_name
             if feature not in data.columns:
                 logger.warning(f"Feature {feature} not found in dataset")
                 continue
+            
+            logger.info(f"Processing feature: {feature}")
+            logger.info(f"Suggested transformations: {insight.suggested_transformations}")
                 
             for transform in insight.suggested_transformations:
                 transform = transform.lower().strip()
                 new_feature_name = None
+                logger.info(f"Applying transformation: {transform}")
                 
                 try:
+                    # Handle logit transformation first
+                    if transform == "logit":
+                        try:
+                            logger.info(f"Attempting logit transform for {feature}")
+                            series = data[feature]
+                            logger.info(f"Value range: [{series.min():.6f}, {series.max():.6f}]")
+
+                            # Check if values are within [0,1] range
+                            if (series >= 0).all() and (series <= 1).all():
+                                logger.info("Values are within [0,1] range")
+                                
+                                # Use an extremely small epsilon for more extreme values
+                                epsilon = 1e-10
+                                
+                                # Force clipping to ensure we get values close to 0 and 1
+                                min_val = series.min()
+                                max_val = series.max()
+                                
+                                # Scale the values to spread them out more
+                                scaled = (series - min_val) / (max_val - min_val)
+                                
+                                # Now clip to ensure we get extreme values
+                                clipped_values = np.clip(scaled.values, epsilon, 1 - epsilon)
+                                logger.info(f"Clipped range: [{np.min(clipped_values):.10f}, {np.max(clipped_values):.10f}]")
+                                
+                                # Apply logit transform to clipped values
+                                transformed_values = special.logit(clipped_values)
+                                logger.info(f"Transformed range: [{np.min(transformed_values):.6f}, {np.max(transformed_values):.6f}]")
+                                
+                                # Create the transformed series
+                                result_df[f"logit_{feature}"] = pd.Series(
+                                    transformed_values,
+                                    index=series.index,
+                                    name=f"logit_{feature}"
+                                )
+                                logger.info(f"Successfully applied logit transform to {feature}")
+                                
+                                # Record transformation metadata
+                                self.transformations[f"logit_{feature}"] = TransformationMetadata(
+                                    original_features=[feature],
+                                    transformation_type="logit",
+                                    parameters={"epsilon": epsilon},
+                                    rationale="Map values from (0,1) to (-inf,inf) using logit function"
+                                )
+                                continue
+                            else:
+                                logger.warning(f"Values for {feature} must be in [0,1] for logit transform")
+                                continue
+                        except Exception as e:
+                            logger.error(f"Error applying logit transform to {feature}: {str(e)}")
+                            continue
+                    
+                    # Handle other transformations
                     if transform.startswith("log"):
                         # Log transformation
                         if data[feature].min() >= 0:
                             new_feature_name = f"log_{feature}"
                             result_df[new_feature_name] = np.log1p(data[feature])
+                            logger.info(f"Applied log transform to {feature}")
+                            
+                            # Record transformation metadata
+                            self.transformations[new_feature_name] = TransformationMetadata(
+                                original_features=[feature],
+                                transformation_type="log",
+                                parameters={},
+                                rationale=insight.rationale
+                            )
+                            logger.info(f"Recorded transformation metadata for {new_feature_name}")
                     
                     elif transform.startswith("sqrt"):
                         # Square root transformation
                         if data[feature].min() >= 0:
                             new_feature_name = f"sqrt_{feature}"
                             result_df[new_feature_name] = np.sqrt(data[feature])
+                            logger.info(f"Applied sqrt transform to {feature}")
                     
                     elif transform.startswith("square"):
                         # Square transformation
                         new_feature_name = f"square_{feature}"
                         result_df[new_feature_name] = np.square(data[feature])
+                        logger.info(f"Applied square transform to {feature}")
                     
                     elif transform.startswith("cube"):
                         # Cube transformation
                         new_feature_name = f"cube_{feature}"
                         result_df[new_feature_name] = np.power(data[feature], 3)
+                        logger.info(f"Applied cube transform to {feature}")
                     
                     elif transform.startswith("bin"):
                         # Binning transformation
@@ -209,16 +282,19 @@ class FeatureGenerator:
                             labels=[f"bin_{i}" for i in range(n_bins)],
                             duplicates='drop'
                         )
+                        logger.info(f"Applied binning transform to {feature}")
                     
                     elif transform.startswith("zscore"):
                         # Z-score normalization
                         new_feature_name = f"zscore_{feature}"
                         result_df[new_feature_name] = (data[feature] - data[feature].mean()) / data[feature].std()
+                        logger.info(f"Applied z-score transform to {feature}")
                     
                     elif transform.startswith("minmax"):
                         # Min-max scaling
                         new_feature_name = f"minmax_{feature}"
                         result_df[new_feature_name] = (data[feature] - data[feature].min()) / (data[feature].max() - data[feature].min())
+                        logger.info(f"Applied min-max transform to {feature}")
                     
                     elif transform.startswith("power"):
                         # Power transformation
@@ -231,6 +307,7 @@ class FeatureGenerator:
                         
                         new_feature_name = f"power_{power}_{feature}"
                         result_df[new_feature_name] = np.power(data[feature], power)
+                        logger.info(f"Applied power transform to {feature}")
                     
                     elif transform.startswith("diff"):
                         # Difference with another feature
@@ -238,6 +315,7 @@ class FeatureGenerator:
                             if related in data.columns and related != feature:
                                 new_feature_name = f"diff_{feature}_{related}"
                                 result_df[new_feature_name] = data[feature] - data[related]
+                                logger.info(f"Applied difference transform between {feature} and {related}")
                     
                     elif transform.startswith("ratio"):
                         # Ratio with another feature
@@ -248,20 +326,98 @@ class FeatureGenerator:
                                 # Avoid division by zero
                                 if (denominator != 0).all():
                                     result_df[new_feature_name] = data[feature] / denominator
+                                    logger.info(f"Applied ratio transform between {feature} and {related}")
                     
-                    # Record transformation metadata if successful
-                    if new_feature_name:
+                    # scipy.stats transformations
+                    elif transform.startswith("boxcox"):
+                        # Box-Cox transformation for positive data
+                        if data[feature].min() > 0:
+                            new_feature_name = f"boxcox_{feature}"
+                            result_df[new_feature_name], _ = stats.boxcox(data[feature])
+                            logger.info(f"Applied Box-Cox transform to {feature}")
+                    
+                    elif transform.startswith("yeojohnson"):
+                        # Yeo-Johnson transformation (works with negative values)
+                        new_feature_name = f"yeojohnson_{feature}"
+                        result_df[new_feature_name], _ = stats.yeojohnson(data[feature])
+                        logger.info(f"Applied Yeo-Johnson transform to {feature}")
+                    
+                    elif transform.startswith("quantile"):
+                        # Quantile transformation to normal distribution
+                        new_feature_name = f"quantile_{feature}"
+                        result_df[new_feature_name] = stats.norm.ppf(
+                            stats.rankdata(data[feature]) / (len(data[feature]) + 1)
+                        )
+                        logger.info(f"Applied quantile transform to {feature}")
+                    
+                    # scipy.signal transformations
+                    elif transform.startswith("detrend"):
+                        # Remove linear trend from data
+                        new_feature_name = f"detrend_{feature}"
+                        result_df[new_feature_name] = signal.detrend(data[feature])
+                        logger.info(f"Applied detrend transform to {feature}")
+                    
+                    elif transform.startswith("savgol"):
+                        # Savitzky-Golay filter for smoothing
+                        window = 5  # Default window size
+                        if "window=" in transform:
+                            try:
+                                window = int(transform.split("window=")[1].split()[0])
+                            except (IndexError, ValueError):
+                                pass
+                        window = min(window, len(data[feature]) - 1)
+                        if window % 2 == 0:
+                            window -= 1
+                        new_feature_name = f"savgol_{feature}"
+                        result_df[new_feature_name] = signal.savgol_filter(
+                            data[feature],
+                            window,
+                            3  # polynomial order
+                        )
+                        logger.info(f"Applied Savitzky-Golay filter to {feature}")
+                    
+                    elif transform.startswith("hilbert"):
+                        # Hilbert transform for analyzing instantaneous attributes
+                        new_feature_name = f"hilbert_{feature}"
+                        hilbert_transform = signal.hilbert(data[feature])
+                        result_df[new_feature_name] = np.abs(hilbert_transform)  # Envelope
+                        logger.info(f"Applied Hilbert transform to {feature}")
+                    
+                    # scipy.special transformations
+                    elif transform == "expit":
+                        # Sigmoid transformation
+                        new_feature_name = f"sigmoid_{feature}"
+                        result_df[new_feature_name] = special.expit(data[feature])
+                        logger.info(f"Applied sigmoid transform to {feature}")
+                        
+                        # Record transformation metadata
+                        self.transformations[new_feature_name] = TransformationMetadata(
+                            original_features=[feature],
+                            transformation_type="sigmoid",
+                            parameters={},
+                            rationale=insight.rationale
+                        )
+                        logger.info(f"Recorded transformation metadata for {new_feature_name}")
+                    
+                    # Record transformation metadata if successful and not already recorded
+                    # Only record if not already recorded by a specific transformation
+                    if new_feature_name and new_feature_name not in self.transformations:
                         self.transformations[new_feature_name] = TransformationMetadata(
                             original_features=[feature],
                             transformation_type=transform,
                             parameters={},
                             rationale=insight.rationale
                         )
+                        logger.info(f"Recorded transformation metadata for {new_feature_name}")
                 
                 except Exception as e:
                     logger.warning(f"Failed to apply transformation {transform} to {feature}: {str(e)}")
+                    logger.warning(f"Exception type: {type(e)}")
+                    logger.warning(f"Exception traceback:", exc_info=True)
                     continue
         
+        logger.info(f"Final columns after transformations: {result_df.columns.tolist()}")
+        logger.info(f"Recorded transformations: {list(self.transformations.keys())}")
         return result_df
     
     def _generate_text_features(
