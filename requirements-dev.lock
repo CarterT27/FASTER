@@ -78,10 +78,7 @@ langchain-community==0.3.19
 langchain-core==0.3.44
     # via langchain
     # via langchain-community
-    # via langchain-openai
     # via langchain-text-splitters
-langchain-openai==0.3.8
-    # via faster
 langchain-text-splitters==0.3.6
     # via langchain
 langsmith==0.3.13
@@ -107,9 +104,9 @@ numpy==2.0.2
     # via scikit-learn
     # via scipy
     # via statsmodels
+    # via xgboost
 openai==1.66.3
     # via faster
-    # via langchain-openai
 orjson==3.10.15
     # via langsmith
 packaging==24.2
@@ -157,14 +154,11 @@ pyyaml==6.0.2
     # via langchain
     # via langchain-community
     # via langchain-core
-regex==2024.11.6
-    # via tiktoken
 requests==2.32.3
     # via langchain
     # via langchain-community
     # via langsmith
     # via requests-toolbelt
-    # via tiktoken
 requests-toolbelt==1.0.0
     # via langsmith
 rich==13.9.4
@@ -176,6 +170,7 @@ scipy==1.13.1
     # via faster
     # via scikit-learn
     # via statsmodels
+    # via xgboost
 shellingham==1.5.4
     # via typer
 six==1.17.0
@@ -193,8 +188,6 @@ tenacity==9.0.0
     # via langchain-core
 threadpoolctl==3.5.0
     # via scikit-learn
-tiktoken==0.9.0
-    # via langchain-openai
 tomli==2.2.1
     # via coverage
     # via pytest
@@ -219,6 +212,8 @@ tzdata==2025.1
     # via pandas
 urllib3==2.3.0
     # via requests
+xgboost==2.1.4
+    # via faster
 yarl==1.18.3
     # via aiohttp
 zstandard==0.23.0

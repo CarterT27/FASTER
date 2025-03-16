@@ -22,15 +22,15 @@ logger = get_logger(__name__)
 class SelectionCriteria:
     """Criteria for feature selection."""
     
-    p_value_threshold: float = 0.05
-    min_effect_size: float = 0.1
-    max_correlation: float = 0.8  # Reduced from 0.9 to be more conservative
-    min_mutual_info: float = 0.01
+    p_value_threshold: float = 0.1  # Increased from 0.05 to be less strict
+    min_effect_size: float = 0.05  # Decreased from 0.1 to be less strict
+    max_correlation: float = 0.9  # Increased from 0.8 to allow more correlated features
+    min_mutual_info: float = 0.005  # Decreased from 0.01 to be less strict
     max_features: Optional[int] = None
-    min_importance_score: float = 0.02  # Minimum importance score to keep a feature
-    vif_threshold: float = 10.0  # VIF threshold for multicollinearity
+    min_importance_score: float = 0.01  # Decreased from 0.02 to be less strict
+    vif_threshold: float = 15.0  # Increased from 10.0 to be less strict
     cv_folds: int = 5  # Number of cross-validation folds
-    stability_threshold: float = 0.7  # Frequency threshold for stability selection
+    stability_threshold: float = 0.6  # Decreased from 0.7 to be less strict
 
 @dataclass
 class SelectionResult:
@@ -359,36 +359,95 @@ class FeatureSelector:
         target: pd.Series,
         is_classification: bool,
     ) -> Tuple[List[str], Dict[str, float]]:
-        """Select features using ML-based importance with cross-validation."""
+        """Select features using XGBoost-based importance with cross-validation."""
         if features.empty:
             logger.warning("No features available for ML-based selection")
             return [], {}
+        
+        # Import XGBoost
+        import xgboost as xgb
         
         # Create cross-validation splitter
         cv = StratifiedKFold(n_splits=self.criteria.cv_folds, shuffle=True, random_state=self.random_state) if is_classification else KFold(n_splits=self.criteria.cv_folds, shuffle=True, random_state=self.random_state)
         
         # Initialize models for importance evaluation
         if is_classification:
-            rf_model = RandomForestClassifier(n_estimators=100, random_state=self.random_state)
+            # XGBoost Classifier with anti-overfitting parameters
+            xgb_model = xgb.XGBClassifier(
+                n_estimators=100, 
+                learning_rate=0.05,
+                max_depth=3,  # Shallow trees to prevent overfitting
+                min_child_weight=2,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                gamma=1,
+                reg_alpha=0.1,
+                reg_lambda=1,
+                random_state=self.random_state
+            )
             linear_model = LogisticRegression(random_state=self.random_state, penalty='l1', solver='liblinear', C=1.0)
         else:
-            rf_model = RandomForestRegressor(n_estimators=100, random_state=self.random_state)
+            # XGBoost Regressor with anti-overfitting parameters
+            xgb_model = xgb.XGBRegressor(
+                n_estimators=100, 
+                learning_rate=0.05,
+                max_depth=3,
+                min_child_weight=2,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                gamma=1,
+                reg_alpha=0.1,
+                reg_lambda=1,
+                random_state=self.random_state
+            )
             linear_model = Lasso(alpha=0.01, random_state=self.random_state)
         
         # Calculate feature importance across CV folds
-        rf_importances = np.zeros(features.shape[1])
+        xgb_importances = np.zeros(features.shape[1])
         linear_importances = np.zeros(features.shape[1])
         univariate_scores = np.zeros(features.shape[1])
         
         try:
             # Perform CV to calculate stable feature importances
-            for train_idx, _ in cv.split(features, target):
-                X_train, y_train = features.iloc[train_idx], target.iloc[train_idx]
+            for train_idx, test_idx in cv.split(features, target):
+                X_train, X_test = features.iloc[train_idx], features.iloc[test_idx]
+                y_train, y_test = target.iloc[train_idx], target.iloc[test_idx]
                 
-                # RandomForest importance
-                rf_clone = clone(rf_model)
-                rf_clone.fit(X_train, y_train)
-                rf_importances += rf_clone.feature_importances_
+                # XGBoost importance with early stopping to prevent overfitting
+                xgb_clone = clone(xgb_model)
+                # Enable early stopping
+                try:
+                    # First attempt using newer XGBoost API
+                    xgb_clone.fit(
+                        X_train, y_train,
+                        eval_set=[(X_test, y_test)],
+                        early_stopping_rounds=10,
+                        verbose=False
+                    )
+                except TypeError as e:
+                    if "early_stopping_rounds" in str(e):
+                        logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
+                        # Fallback to older XGBoost API or modified approach
+                        xgb_clone.fit(
+                            X_train, y_train,
+                            eval_set=[(X_test, y_test)],
+                            verbose=False
+                        )
+                    else:
+                        # Some other TypeError
+                        logger.error(f"XGBoost fit error: {str(e)}")
+                        raise
+                except Exception as e:
+                    logger.error(f"Error in XGBoost model fitting: {str(e)}")
+                    # Fallback to simpler model without validation
+                    xgb_clone.fit(X_train, y_train)
+                
+                # Get feature importance
+                if hasattr(xgb_clone, 'feature_importances_'):
+                    xgb_importances += xgb_clone.feature_importances_
+                else:
+                    # Fallback if feature_importances_ not available
+                    xgb_importances += np.ones(features.shape[1]) / features.shape[1]
                 
                 # Linear model importance (coefficients)
                 try:
@@ -398,32 +457,42 @@ class FeatureSelector:
                     if coefs.ndim > 1:  # For multi-class classification
                         coefs = np.mean(coefs, axis=0)
                     linear_importances += coefs
-                except:
-                    pass  # Skip if linear model fails
+                except Exception as e:
+                    logger.warning(f"Linear model failed: {str(e)}. Using fallback importance.")
+                    # Use mean importance if linear model fails
+                    linear_importances += np.ones(features.shape[1]) / features.shape[1]
                 
                 # Univariate statistical test
                 score_func = f_classif if is_classification else f_regression
                 f_stats, _ = score_func(X_train, y_train)
-                univariate_scores += f_stats / np.max(f_stats)  # Normalize
-        
+                # Normalize f-statistics
+                f_normalized = f_stats / np.sum(f_stats) if np.sum(f_stats) > 0 else f_stats
+                univariate_scores += f_normalized
+            
         except Exception as e:
             logger.warning(f"Error in cross-validation importance calculation: {str(e)}")
-            # Fall back to single model importance
-            rf_model.fit(features, target)
-            rf_importances = rf_model.feature_importances_ * self.criteria.cv_folds
+            # Fall back to single XGBoost model importance
+            try:
+                # Use a simpler model for fallback
+                simple_xgb = xgb.XGBClassifier(n_estimators=50, random_state=self.random_state) if is_classification else xgb.XGBRegressor(n_estimators=50, random_state=self.random_state)
+                simple_xgb.fit(features, target)
+                xgb_importances = simple_xgb.feature_importances_ * self.criteria.cv_folds
+            except Exception as fallback_error:
+                logger.error(f"Fallback XGBoost also failed: {str(fallback_error)}. Using equal importance.")
+                xgb_importances = np.ones(features.shape[1]) * self.criteria.cv_folds
         
         # Average importances across folds
-        rf_importances /= self.criteria.cv_folds
+        xgb_importances /= self.criteria.cv_folds
         linear_importances /= self.criteria.cv_folds
         univariate_scores /= self.criteria.cv_folds
         
-        # Combine different importance metrics
+        # Combine different importance metrics with more weight on XGBoost
         combined_importances = np.zeros(features.shape[1])
-        weights = [0.5, 0.3, 0.2]  # Weights for RF, linear, univariate
+        weights = [0.6, 0.2, 0.2]  # Weights for XGBoost, linear, univariate (increased XGBoost weight)
         
         for i in range(features.shape[1]):
             combined_importances[i] = (
-                weights[0] * rf_importances[i] + 
+                weights[0] * xgb_importances[i] + 
                 weights[1] * (linear_importances[i] if i < len(linear_importances) else 0) + 
                 weights[2] * univariate_scores[i]
             )

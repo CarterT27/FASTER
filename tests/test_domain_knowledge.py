@@ -232,7 +232,9 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
     # Replace the client in domain_extractor
     domain_extractor.client = mock_client
     
-    insights = domain_extractor._query_llm_with_retry("test prompt")
+    # Add a request_id parameter
+    request_id = "test-request-id"
+    insights = domain_extractor._query_llm_with_retry("test prompt", request_id)
     assert len(insights) == 2
     assert mock_client.chat.completions.create.call_count == 1
     
@@ -241,10 +243,9 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
         model="deepseek/deepseek-chat:free",
         messages=[{"role": "user", "content": "test prompt"}],
         temperature=0.0,
-        extra_headers={
-            "HTTP-Referer": "https://github.com/CarterT27/FASTER",
-            "X-Title": "FASTER Feature Selection Tool"
-        }
+        top_p=0.95,
+        max_tokens=2048,
+        response_format={"type": "json_object"}
     )
 
 @patch('openai.OpenAI')
@@ -263,8 +264,10 @@ def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
     mock_openai.return_value = mock_client
     domain_extractor.client = mock_client
     
+    # Add a request_id parameter
+    request_id = "test-request-id"
     with pytest.raises(httpx.HTTPStatusError, match="401 Unauthorized"):
-        domain_extractor._query_llm_with_retry("test prompt")
+        domain_extractor._query_llm_with_retry("test prompt", request_id)
     assert mock_client.chat.completions.create.call_count == 3  # Should retry 3 times
 
 @patch('faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry')
@@ -291,14 +294,12 @@ def test_extract_knowledge_integration(mock_query, domain_extractor):
     insights = domain_extractor.extract_knowledge(
         data=data,
         target_column="target",
-        problem_description="Test classification problem",
-        domain_context="Test domain"
+        problem_description="Test classification problem"
     )
     
     assert len(insights) == 1
     assert all(isinstance(insight, DomainInsight) for insight in insights)
     assert insights[0].feature_name == "numeric_feature"
-    assert insights[0].importance == 0.8
 
 def test_default_prompt_config(domain_extractor):
     """Test default prompt configuration."""

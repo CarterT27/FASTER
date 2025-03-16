@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Optional, Union, Set
 from dataclasses import dataclass
 import logging
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -425,46 +426,17 @@ class FeatureGenerator:
                             except (IndexError, ValueError):
                                 pass
                         
-                        new_feature_name = f"binned_{feature}_{n_bins}"
+                        new_feature_name = f"binned_{feature}"
                         
                         try:
-                            # Create both categorical and numeric versions of binned features
-                            # Numeric version is more compatible with statistical methods
-                            # First create bins without labels
-                            bins, bin_edges = pd.qcut(
-                                data[feature], 
-                                q=n_bins, 
-                                retbins=True, 
-                                duplicates='drop'
-                            )
-                            
-                            # Create numeric binned feature (bin index as number)
-                            result_df[new_feature_name] = bins.codes
-                            
-                            # Also create a categorical version for interpretability if needed
-                            cat_feature_name = f"binned_{feature}_{n_bins}_cat"
-                            result_df[cat_feature_name] = pd.qcut(
-                                data[feature],
-                                q=n_bins,
-                                labels=[f"bin_{i}" for i in range(len(bin_edges)-1)],
-                                duplicates='drop'
-                            )
-                            
+                            # Use the more robust binning method
+                            result_df[new_feature_name] = self._apply_binning(data[feature], n_bins=n_bins)
                             transformed_features.add(feature)
-                            
-                            # Record bin edges for later reference
-                            bin_ranges = [f"{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}" 
-                                        for i in range(len(bin_edges)-1)]
                             
                             self.transformations[new_feature_name] = TransformationMetadata(
                                 original_features=[feature],
                                 transformation_type="binning",
-                                parameters={
-                                    "n_bins": n_bins,
-                                    "bin_edges": bin_edges.tolist(),
-                                    "bin_labels": [f"bin_{i}" for i in range(len(bin_edges)-1)],
-                                    "bin_ranges": bin_ranges
-                                },
+                                parameters={"n_bins": n_bins},
                                 rationale=insight.rationale,
                             )
                             logger.info(f"Applied binning transform to {feature}")
@@ -499,19 +471,27 @@ class FeatureGenerator:
                     
                     elif transform.startswith("one_hot") and feature not in transformed_features:
                         # One-hot encoding for categorical features
-                        if data[feature].nunique() < 10:  # Only encode if few unique values
-                            dummies = pd.get_dummies(data[feature], prefix=f"onehot_{feature}")
-                            # Add each dummy column to the result
-                            for col in dummies.columns:
-                                result_df[col] = dummies[col]
-                                self.transformations[col] = TransformationMetadata(
-                                    original_features=[feature],
-                                    transformation_type="one_hot",
-                                    parameters={},
-                                    rationale=insight.rationale,
-                                )
-                            transformed_features.add(feature)
-                            logger.info(f"Applied one-hot encoding to {feature}")
+                        try:
+                            # Use the more robust one-hot encoding method
+                            encoded_df = self._apply_one_hot_encoding(data[feature])
+                            
+                            # Only proceed if we got some encoded columns
+                            if not encoded_df.empty:
+                                # Add each encoded column to the result
+                                for col in encoded_df.columns:
+                                    result_df[col] = encoded_df[col]
+                                    self.transformations[col] = TransformationMetadata(
+                                        original_features=[feature],
+                                        transformation_type="one_hot",
+                                        parameters={},
+                                        rationale=insight.rationale,
+                                    )
+                                transformed_features.add(feature)
+                                logger.info(f"Applied one-hot encoding to {feature}")
+                            else:
+                                logger.warning(f"One-hot encoding produced no columns for {feature}")
+                        except Exception as e:
+                            logger.warning(f"Error applying one-hot encoding to {feature}: {str(e)}")
                     
                     # scipy.stats transformations
                     elif transform.startswith("boxcox") and feature not in transformed_features:
@@ -630,107 +610,234 @@ class FeatureGenerator:
         target_column: str,
         is_classification: bool = True,
     ) -> pd.DataFrame:
-        """Evaluate the utility of each transformation and keep only beneficial ones."""
-        # Get the list of new transformed features
-        original_columns = set(original_data.columns)
-        new_columns = [col for col in transformed_data.columns if col not in original_columns]
-        
-        if not new_columns:
-            return transformed_data
-            
-        logger.info(f"Evaluating utility of {len(new_columns)} transformed features")
-        
+        """Evaluate the utility of transformations using XGBoost with anti-overfitting techniques."""
         try:
-            # Split data for evaluation
-            X_orig = original_data.drop(columns=[target_column])
+            # Group transformations by type for evaluation
+            transform_groups = {}
+            for col in transformed_data.columns:
+                if col in self.transformations:
+                    transform_type = self.transformations[col].transformation_type
+                    if transform_type not in transform_groups:
+                        transform_groups[transform_type] = []
+                    transform_groups[transform_type].append(col)
+            
+            if not transform_groups:
+                logger.info("No transformations to evaluate")
+                return transformed_data
+            
+            # Import XGBoost
+            import xgboost as xgb
+            
+            # Prepare data for evaluation
+            X = original_data.drop(columns=[target_column])
             y = original_data[target_column]
             
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_orig, y, test_size=0.3, random_state=42
-            )
-            
-            # Create baseline model with original features
+            # Use stratified sampling to preserve class distribution
+            from sklearn.model_selection import train_test_split
             if is_classification:
-                baseline_model = RandomForestClassifier(n_estimators=50, random_state=42, max_depth=5)
+                X_train, X_val, y_train, y_val = train_test_split(
+                    X, y, test_size=0.3, random_state=42, stratify=y
+                )
             else:
-                baseline_model = RandomForestRegressor(n_estimators=50, random_state=42, max_depth=5)
-                
-            baseline_model.fit(X_train, y_train)
+                X_train, X_val, y_train, y_val = train_test_split(
+                    X, y, test_size=0.3, random_state=42
+                )
             
-            # Get baseline performance
+            # Select evaluation model and metrics based on problem type
             if is_classification:
                 if len(np.unique(y)) == 2:
-                    y_prob = baseline_model.predict_proba(X_val)[:, 1]
-                    baseline_score = roc_auc_score(y_val, y_prob)
+                    scoring_func = roc_auc_score
+                    model_class = xgb.XGBClassifier
+                    model_params = {
+                        'n_estimators': 50,
+                        'learning_rate': 0.05,
+                        'max_depth': 3,
+                        'min_child_weight': 2,
+                        'subsample': 0.8,
+                        'colsample_bytree': 0.8,
+                        'gamma': 1,
+                        'reg_alpha': 0.1,
+                        'reg_lambda': 1,
+                        'random_state': 42
+                    }
                 else:
-                    y_pred = baseline_model.predict(X_val)
-                    baseline_score = accuracy_score(y_val, y_pred)
+                    scoring_func = accuracy_score
+                    model_class = xgb.XGBClassifier
+                    model_params = {
+                        'n_estimators': 50,
+                        'learning_rate': 0.05,
+                        'max_depth': 3,
+                        'min_child_weight': 2,
+                        'subsample': 0.8,
+                        'colsample_bytree': 0.8,
+                        'gamma': 1,
+                        'reg_alpha': 0.1,
+                        'reg_lambda': 1,
+                        'random_state': 42
+                    }
             else:
-                y_pred = baseline_model.predict(X_val)
-                baseline_score = r2_score(y_val, y_pred)
-                
+                scoring_func = r2_score
+                model_class = xgb.XGBRegressor
+                model_params = {
+                    'n_estimators': 50,
+                    'learning_rate': 0.05,
+                    'max_depth': 3,
+                    'min_child_weight': 2,
+                    'subsample': 0.8,
+                    'colsample_bytree': 0.8,
+                    'gamma': 1,
+                    'reg_alpha': 0.1,
+                    'reg_lambda': 1,
+                    'random_state': 42
+                }
+            
+            # Train baseline model on original features with early stopping
+            baseline_model = model_class(**model_params)
+            
+            # Handle potential issues in validation data
+            X_val_orig = X.iloc[X_val.index].copy()
+            eval_metric = 'auc' if is_classification and len(np.unique(y)) == 2 else ('error' if is_classification else 'rmse')
+            
+            # Fit with early stopping to prevent overfitting
+            try:
+                # First attempt using newer XGBoost API
+                baseline_model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val_orig, y_val)],
+                    early_stopping_rounds=5,
+                    eval_metric=eval_metric,
+                    verbose=False
+                )
+            except TypeError as e:
+                if "early_stopping_rounds" in str(e):
+                    logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
+                    # Fallback to older XGBoost API or modified approach
+                    baseline_model.fit(
+                        X_train, y_train,
+                        eval_set=[(X_val_orig, y_val)],
+                        verbose=False
+                    )
+                else:
+                    # Some other TypeError
+                    logger.error(f"XGBoost fit error: {str(e)}")
+                    raise
+            except Exception as e:
+                logger.error(f"Error in baseline model fitting: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                # Fallback to simpler model without validation
+                baseline_model.fit(X_train, y_train)
+            
+            # Get baseline performance
+            if is_classification and len(np.unique(y)) == 2:
+                y_prob = baseline_model.predict_proba(X_val_orig)[:, 1]
+                baseline_score = scoring_func(y_val, y_prob)
+            else:
+                y_pred = baseline_model.predict(X_val_orig)
+                baseline_score = scoring_func(y_val, y_pred)
+            
             logger.info(f"Baseline model performance: {baseline_score:.4f}")
             
-            # Evaluate each transformation
-            beneficial_features = list(original_columns)
+            # Keep track of features from original data and beneficial transformations
+            beneficial_features = list(original_data.columns)
             feature_gains = {}
             
-            # Group features by transformation type for more efficient evaluation
-            transform_groups = {}
-            for col in new_columns:
-                transform_type = col.split('_')[0] if '_' in col else 'other'
-                if transform_type not in transform_groups:
-                    transform_groups[transform_type] = []
-                transform_groups[transform_type].append(col)
+            # Store performance improvement by transformation type
+            transform_performance = {}
             
-            # Evaluate each transformation group
+            # Evaluate each transformation type
             for transform_type, cols in transform_groups.items():
-                logger.info(f"Evaluating {transform_type} transformations with {len(cols)} features")
+                logger.info(f"Evaluating {transform_type} transformations ({len(cols)} features)")
                 
-                # Create dataset with original features plus this transformation group
-                X_trans = pd.concat([X_orig, transformed_data[cols]], axis=1)
-                X_train_trans, X_val_trans = train_test_split(
-                    X_trans, test_size=0.3, random_state=42
-                )
+                # Create model for this transformation type
+                eval_model = model_class(**model_params)
                 
-                # Create model with original + transformed features
-                if is_classification:
-                    model = RandomForestClassifier(n_estimators=50, random_state=42, max_depth=5)
-                else:
-                    model = RandomForestRegressor(n_estimators=50, random_state=42, max_depth=5)
-                    
-                model.fit(X_train_trans, y_train)
+                # Get transformed data with these specific transformed features + original features
+                X_trans = pd.concat([
+                    X,  # original features
+                    transformed_data[cols]  # only the current transformation group
+                ], axis=1)
                 
-                # Get performance
-                if is_classification:
-                    if len(np.unique(y)) == 2:
-                        y_prob = model.predict_proba(X_val_trans)[:, 1]
-                        score = roc_auc_score(y_val, y_prob)
+                X_train_trans = X_trans.iloc[X_train.index]
+                X_val_trans = X_trans.iloc[X_val.index]
+                
+                # Fit model with early stopping
+                try:
+                    # First attempt using newer XGBoost API
+                    eval_model.fit(
+                        X_train_trans, y_train,
+                        eval_set=[(X_val_trans, y_val)],
+                        early_stopping_rounds=5,
+                        eval_metric=eval_metric,
+                        verbose=False
+                    )
+                except TypeError as e:
+                    if "early_stopping_rounds" in str(e):
+                        logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
+                        # Fallback to older XGBoost API or modified approach
+                        eval_model.fit(
+                            X_train_trans, y_train,
+                            eval_set=[(X_val_trans, y_val)],
+                            verbose=False
+                        )
                     else:
-                        y_pred = model.predict(X_val_trans)
-                        score = accuracy_score(y_val, y_pred)
-                else:
-                    y_pred = model.predict(X_val_trans)
-                    score = r2_score(y_val, y_pred)
+                        # Some other TypeError
+                        logger.error(f"XGBoost fit error: {str(e)}")
+                        raise
+                except Exception as e:
+                    logger.error(f"Error in transformation model fitting: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    # Fallback to simpler model without validation
+                    eval_model.fit(X_train_trans, y_train)
                 
-                # Calculate improvement
-                improvement = score - baseline_score
-                logger.info(f"{transform_type} transformation performance: {score:.4f} (improvement: {improvement:.4f})")
+                # Evaluate performance
+                try:
+                    if is_classification and len(np.unique(y)) == 2:
+                        y_prob = eval_model.predict_proba(X_val_trans)[:, 1]
+                        score = scoring_func(y_val, y_prob)
+                    else:
+                        y_pred = eval_model.predict(X_val_trans)
+                        score = scoring_func(y_val, y_pred)
+                    
+                    # Calculate improvement
+                    improvement = score - baseline_score
+                    transform_performance[transform_type] = improvement
+                    logger.info(f"{transform_type} transformation performance: {score:.4f} (improvement: {improvement:.4f})")
+                except Exception as e:
+                    logger.error(f"Error evaluating transformation performance: {str(e)}")
+                    # Use a conservative approach - assume no improvement
+                    improvement = -0.01
+                    transform_performance[transform_type] = improvement
+                    logger.warning(f"Using fallback score for {transform_type} transformations")
                 
-                # Only keep transformations that improve performance
-                if improvement > 0.001:  # Minimum improvement threshold
+                # Keep transformations that don't degrade performance
+                # Use a small negative threshold to accommodate for randomness
+                if improvement >= -0.01:  # Allow slight performance degradation due to randomness
                     beneficial_features.extend(cols)
                     
-                    # Also get individual feature importance from the model
-                    importances = model.feature_importances_
-                    for i, col in enumerate(X_trans.columns):
-                        if col in cols:
-                            # Store performance gain in transformation metadata
-                            feature_gains[col] = importances[i]
-                            if col in self.transformations:
-                                self.transformations[col].performance_gain = importances[i]
+                    # Get feature importance for these transformations
+                    try:
+                        importances = eval_model.feature_importances_
+                        feature_names = list(X_train_trans.columns)
+                        
+                        # Record importance for the transformed features
+                        for col in cols:
+                            if col in feature_names:
+                                col_idx = feature_names.index(col)
+                                imp_value = importances[col_idx]
+                                feature_gains[col] = imp_value
+                    except Exception as e:
+                        logger.error(f"Error getting feature importances: {str(e)}")
+                        # Set default importance values
+                        for col in cols:
+                            feature_gains[col] = 0.01  # Small default value
             
-            # Keep only beneficial features
+            # Output performance by transformation type
+            logger.info("Performance improvement by transformation type:")
+            for t_type, improvement in sorted(transform_performance.items(), key=lambda x: x[1], reverse=True):
+                logger.info(f"  {t_type}: {improvement:.4f}")
+            
+            # Keep only beneficial features from the transformed data
+            beneficial_features = list(set(beneficial_features))  # Remove duplicates
             result_df = transformed_data[beneficial_features].copy()
             
             # Log removed features
@@ -738,12 +845,13 @@ class FeatureGenerator:
             if removed_features:
                 logger.info(f"Removed {len(removed_features)} non-beneficial transformed features")
                 logger.debug(f"Removed features: {removed_features}")
-            
+                
             return result_df
-            
+        
         except Exception as e:
-            logger.warning(f"Error evaluating transformations: {str(e)}")
-            # In case of error, return original transformed data
+            logger.error(f"Error in transformation evaluation: {str(e)}")
+            logger.error(traceback.format_exc())
+            # If evaluation fails, return the original transformed data
             return transformed_data
     
     @staticmethod
@@ -768,4 +876,51 @@ class FeatureGenerator:
             return False
         # Consider it text if at least 20% of values have more than 3 words
         text_values = [x for x in sample if isinstance(x, str) and len(x.split()) > 3]
-        return len(text_values) >= max(1, 0.2 * len(sample)) 
+        return len(text_values) >= max(1, 0.2 * len(sample))
+    
+    def _apply_binning(self, series: pd.Series, n_bins: int = 5) -> pd.Series:
+        """Apply equal-width binning to a numerical feature."""
+        try:
+            # Handle non-numeric data
+            if not pd.api.types.is_numeric_dtype(series):
+                logger.warning(f"Cannot apply binning to non-numeric column: {series.name}")
+                return series
+                
+            # Create bins using pandas cut
+            binned = pd.cut(
+                series,
+                bins=n_bins,
+                labels=False,
+                include_lowest=True,
+                duplicates='drop'
+            )
+            
+            # Handle potential NaN values
+            if binned.isna().any():
+                logger.warning(f"Binning produced NaN values for column {series.name}")
+                # Replace NaNs with most frequent bin
+                mode_bin = binned.mode().iloc[0] if not binned.dropna().empty else 0
+                binned = binned.fillna(mode_bin)
+                
+            return binned
+            
+        except Exception as e:
+            logger.warning(f"Error applying binning to {series.name}: {str(e)}")
+            return series
+            
+    def _apply_one_hot_encoding(self, series: pd.Series) -> pd.DataFrame:
+        """Apply one-hot encoding to a categorical feature."""
+        try:
+            # For numeric columns, convert to string first to treat as categorical
+            if pd.api.types.is_numeric_dtype(series):
+                series = series.astype(str)
+                
+            # Use pandas get_dummies
+            encoded = pd.get_dummies(series, prefix=f"onehot_{series.name}")
+            
+            return encoded
+            
+        except Exception as e:
+            logger.warning(f"Error applying one-hot encoding to {series.name}: {str(e)}")
+            # Return empty DataFrame on error
+            return pd.DataFrame(index=series.index) 

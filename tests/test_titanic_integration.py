@@ -112,14 +112,19 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
             clf, X, y,
             cv=5,
             scoring=scoring,
-            return_train_score=False
+            return_train_score=True
         )
     
     # Calculate mean scores
     return {
-        'accuracy': cv_results['test_accuracy'].mean(),
-        'f1': cv_results['test_f1'].mean(),
-        'roc_auc': cv_results['test_roc_auc'].mean()
+        # Test scores
+        'test_accuracy': cv_results['test_accuracy'].mean(),
+        'test_f1': cv_results['test_f1'].mean(),
+        'test_roc_auc': cv_results['test_roc_auc'].mean(),
+        # Train scores
+        'train_accuracy': cv_results['train_accuracy'].mean(),
+        'train_f1': cv_results['train_f1'].mean(),
+        'train_roc_auc': cv_results['train_roc_auc'].mean()
     }
 
 def verify_openrouter_api_key() -> str:
@@ -333,17 +338,30 @@ def test_titanic_integration(use_mock):
     
     # Print results
     print(f"\nModel Performance Comparison ({'Mock' if use_mock else 'Real'} LLM):")
+    
     print("\nBaseline Model:")
-    for metric, score in baseline_scores.items():
-        print(f"{metric}: {score:.4f}")
+    print("  Train Metrics:")
+    for metric, score in [(k, v) for k, v in baseline_scores.items() if k.startswith('train')]:
+        print(f"    {metric.replace('train_', '')}: {score:.4f}")
+    print("  Test Metrics:")
+    for metric, score in [(k, v) for k, v in baseline_scores.items() if k.startswith('test')]:
+        print(f"    {metric.replace('test_', '')}: {score:.4f}")
     
     print("\nFASTER (No Domain Knowledge):")
-    for metric, score in faster_no_domain_scores.items():
-        print(f"{metric}: {score:.4f}")
+    print("  Train Metrics:")
+    for metric, score in [(k, v) for k, v in faster_no_domain_scores.items() if k.startswith('train')]:
+        print(f"    {metric.replace('train_', '')}: {score:.4f}")
+    print("  Test Metrics:")
+    for metric, score in [(k, v) for k, v in faster_no_domain_scores.items() if k.startswith('test')]:
+        print(f"    {metric.replace('test_', '')}: {score:.4f}")
     
     print("\nFASTER (With Domain Knowledge):")
-    for metric, score in faster_with_domain_scores.items():
-        print(f"{metric}: {score:.4f}")
+    print("  Train Metrics:")
+    for metric, score in [(k, v) for k, v in faster_with_domain_scores.items() if k.startswith('train')]:
+        print(f"    {metric.replace('train_', '')}: {score:.4f}")
+    print("  Test Metrics:")
+    for metric, score in [(k, v) for k, v in faster_with_domain_scores.items() if k.startswith('test')]:
+        print(f"    {metric.replace('test_', '')}: {score:.4f}")
     
     # Print generated features
     print("\nGenerated Features:")

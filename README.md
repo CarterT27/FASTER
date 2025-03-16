@@ -34,6 +34,17 @@ The FASTER framework has undergone several key improvements to address performan
 - **Request Tracking**: Track all LLM interactions with unique request IDs
 - **Response Validation**: Enhanced validation of LLM responses
 
+### Anti-Overfitting Measures
+
+- **XGBoost Integration**: Replaced RandomForest with highly regularized XGBoost models in feature selection and evaluation
+- **Regularization Parameters**: Implemented L1/L2 regularization, controlled tree depth, and subsample ratios
+- **Early Stopping**: Added early stopping during model training to prevent memorization of training data
+- **Cross-Validation**: Expanded cross-validation to better estimate model performance
+- **Overfitting Ratio Tracking**: New metrics track the ratio of test to train performance to identify overfitting
+- **Stratified Sampling**: Ensures class distributions are maintained in validation splits
+- **Shallow Decision Trees**: Using max_depth=3 to create simpler, more generalizable models
+- **Feature Subsampling**: Using colsample_bytree parameter to evaluate features on different subsets
+
 ### Enhanced Feature Selection
 
 - **Cross-Validation Feature Importance**: Now uses cross-validation to calculate more robust feature importance scores

@@ -1,4 +1,4 @@
-"""Integration test using the Iris dataset to compare FASTER with baseline models for regression."""
+"""Integration test using the Auto MPG dataset to compare FASTER with baseline models for regression."""
 
 import pytest
 import pandas as pd
@@ -10,9 +10,10 @@ import warnings
 from typing import Dict, List, Tuple
 from unittest.mock import patch
 import os
-from sklearn import datasets
 import openai
 import logging
+from sklearn.datasets import fetch_openml
+from sklearn.impute import SimpleImputer
 
 from faster.pipeline import Pipeline, PipelineConfig
 from faster.feature_selection import SelectionCriteria
@@ -22,70 +23,100 @@ from faster.domain_knowledge import DomainKnowledgeExtractor
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Mock LLM response for Iris dataset
+# Mock LLM response for Auto MPG dataset
 MOCK_LLM_RESPONSE = [
     {
-        "feature_name": "petal_length",
+        "feature_name": "horsepower",
         "importance": 0.9,
-        "relationships": ["petal_width", "species"],
-        "suggested_transformations": ["log", "zscore", "polynomial"],
-        "rationale": "Petal length is highly correlated with sepal length across iris species"
+        "relationships": ["weight", "cylinders", "displacement"],
+        "suggested_transformations": ["log", "zscore", "polynomial", "square_root"],
+        "rationale": "Horsepower has an inverse relationship with MPG. More powerful engines consume more fuel."
     },
     {
-        "feature_name": "petal_width",
+        "feature_name": "weight",
+        "importance": 0.85,
+        "relationships": ["horsepower", "displacement"],
+        "suggested_transformations": ["log", "zscore", "polynomial", "reciprocal"],
+        "rationale": "Heavier cars require more energy to move, directly impacting fuel efficiency."
+    },
+    {
+        "feature_name": "displacement",
         "importance": 0.8,
-        "relationships": ["petal_length", "species"],
-        "suggested_transformations": ["log", "zscore", "polynomial"],
-        "rationale": "Petal width correlates with overall flower size including sepal length"
+        "relationships": ["cylinders", "horsepower"],
+        "suggested_transformations": ["log", "zscore", "polynomial", "square_root"],
+        "rationale": "Engine displacement affects fuel consumption; larger engines typically consume more fuel."
     },
     {
-        "feature_name": "species",
+        "feature_name": "cylinders",
+        "importance": 0.75,
+        "relationships": ["displacement", "horsepower"],
+        "suggested_transformations": ["one_hot", "zscore", "polynomial"],
+        "rationale": "Number of cylinders correlates with engine size and fuel consumption."
+    },
+    {
+        "feature_name": "model_year",
         "importance": 0.7,
-        "relationships": ["petal_length", "petal_width"],
-        "suggested_transformations": ["one_hot", "label"],
-        "rationale": "Different iris species have characteristic sepal lengths"
+        "relationships": ["weight", "horsepower"],
+        "suggested_transformations": ["zscore", "binning", "time_since"],
+        "rationale": "Newer models tend to have improved fuel efficiency due to technological advancements."
     },
     {
-        "feature_name": "sepal_width",
+        "feature_name": "origin",
+        "importance": 0.6,
+        "relationships": ["model_year", "weight"],
+        "suggested_transformations": ["one_hot", "label"],
+        "rationale": "Cars from different regions had different design philosophies affecting fuel efficiency."
+    },
+    {
+        "feature_name": "acceleration",
         "importance": 0.5,
-        "relationships": ["sepal_length"],
-        "suggested_transformations": ["zscore", "polynomial"],
-        "rationale": "Sepal width has a moderate correlation with sepal length"
+        "relationships": ["horsepower", "weight"],
+        "suggested_transformations": ["zscore", "polynomial", "reciprocal"],
+        "rationale": "Acceleration capability relates to power-to-weight ratio, indirectly impacting fuel efficiency."
     }
 ]
 
-def load_and_preprocess_iris() -> Tuple[pd.DataFrame, pd.Series]:
-    """Load and preprocess the Iris dataset for regression (predicting sepal length)."""
-    # Load Iris dataset
-    iris = datasets.load_iris()
+def load_and_preprocess_auto_mpg() -> Tuple[pd.DataFrame, pd.Series]:
+    """Load and preprocess the Auto MPG dataset for regression (predicting MPG)."""
+    try:
+        # Try to fetch the dataset using fetch_openml
+        auto_mpg = fetch_openml(name="auto-mpg", version=1, as_frame=True)
+        
+        df = auto_mpg.data
+        df['mpg'] = auto_mpg.target
+        
+    except Exception as e:
+        logger.warning(f"Error fetching from OpenML: {str(e)}. Falling back to local loading...")
+        
+        # Fallback to loading from UCI repository using pandas
+        url = "https://archive.ics.uci.edu/ml/machine-learning-databases/auto-mpg/auto-mpg.data"
+        column_names = ['mpg', 'cylinders', 'displacement', 'horsepower', 
+                         'weight', 'acceleration', 'model_year', 'origin', 'car_name']
+        df = pd.read_csv(url, delim_whitespace=True, header=None, 
+                         names=column_names, na_values='?')
     
-    # Create DataFrame
-    feature_names = iris.feature_names
-    df = pd.DataFrame(iris.data, columns=feature_names)
-    df['species'] = iris.target
+    # Remove car_name column as it's just an identifier
+    if 'car_name' in df.columns:
+        df = df.drop('car_name', axis=1)
     
-    # Map species to string labels for better interpretability
-    species_mapping = {0: 'setosa', 1: 'versicolor', 2: 'virginica'}
-    df['species'] = df['species'].map(species_mapping)
+    # Handle missing values
+    numeric_columns = ['horsepower']  # Only horsepower has missing values typically
+    imputer = SimpleImputer(strategy='median')
+    df[numeric_columns] = imputer.fit_transform(df[numeric_columns])
     
-    # Rename columns to more readable names
-    column_mapping = {
-        'sepal length (cm)': 'sepal_length',
-        'sepal width (cm)': 'sepal_width',
-        'petal length (cm)': 'petal_length',
-        'petal width (cm)': 'petal_width'
-    }
-    df = df.rename(columns=column_mapping)
+    # Convert 'origin' to a categorical feature with meaningful labels
+    origin_mapping = {1: 'american', 2: 'european', 3: 'asian'}
+    df['origin'] = df['origin'].map(origin_mapping)
     
-    # For regression, we'll predict sepal_length based on other features
-    X = df[['sepal_width', 'petal_length', 'petal_width', 'species']].copy()
-    y = df['sepal_length']
+    # For regression, we'll predict mpg based on other features
+    y = df['mpg']
+    X = df.drop('mpg', axis=1)
     
     # Encode categorical features
-    X = pd.get_dummies(X, columns=['species'], drop_first=False)
+    X = pd.get_dummies(X, columns=['origin'], drop_first=False)
     
     # Scale numeric features
-    numeric_features = ['sepal_width', 'petal_length', 'petal_width']
+    numeric_features = ['cylinders', 'displacement', 'horsepower', 'weight', 'acceleration', 'model_year']
     scaler = StandardScaler()
     X[numeric_features] = scaler.fit_transform(X[numeric_features])
     
@@ -109,7 +140,7 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
             regressor, X, y,
             cv=5,
             scoring=scoring,
-            return_train_score=True
+            return_train_score=True  # Changed to True to get train scores
         )
     
     # Calculate mean scores (negate the error metrics to get positive values)
@@ -171,8 +202,8 @@ def configure_openai_client(api_key: str) -> openai.OpenAI:
     )
 
 @pytest.mark.parametrize("use_mock", [True, False])
-def test_iris_integration(use_mock):
-    """Integration test comparing baseline and FASTER-enhanced models on Iris dataset for regression."""
+def test_auto_mpg_integration(use_mock):
+    """Integration test comparing baseline and FASTER-enhanced models on Auto MPG dataset for regression."""
     # Set up OpenRouter credentials for non-mock tests
     if not use_mock:
         try:
@@ -200,9 +231,9 @@ def test_iris_integration(use_mock):
             pytest.skip(f"Skipping non-mock test: {str(e)}")
 
     # Load and preprocess data
-    X, y = load_and_preprocess_iris()
+    X, y = load_and_preprocess_auto_mpg()
     data = X.copy()
-    data['sepal_length'] = y
+    data['mpg'] = y
     
     # 1. Evaluate baseline model
     baseline_scores = evaluate_model(X, y)
@@ -231,29 +262,35 @@ def test_iris_integration(use_mock):
             pipeline_no_domain = Pipeline(config)
             result_no_domain = pipeline_no_domain.run(
                 data=data,
-                target_column='sepal_length',
-                problem_description="Regression problem predicting sepal length",
+                target_column='mpg',
+                problem_description="Regression problem predicting miles per gallon (MPG) of automobiles",
                 is_classification=False
             )
             
             pipeline_with_domain = Pipeline(config)
             result_with_domain = pipeline_with_domain.run(
                 data=data,
-                target_column='sepal_length',
+                target_column='mpg',
                 problem_description="""
-                Regression problem predicting sepal length of iris flowers.
+                Regression problem predicting miles per gallon (MPG) of automobiles.
                 Features:
-                - sepal_width: Width of the sepal in cm
-                - petal_length: Length of the petal in cm
-                - petal_width: Width of the petal in cm
-                - species: Type of iris (setosa, versicolor, virginica)
+                - cylinders: Number of cylinders in the engine (integer)
+                - displacement: Engine displacement in cubic inches (continuous)
+                - horsepower: Engine horsepower (continuous)
+                - weight: Vehicle weight in pounds (continuous)
+                - acceleration: Time to accelerate from 0 to 60 mph in seconds (continuous)
+                - model_year: Vehicle model year (integer, 70-82 representing 1970-1982)
+                - origin: Origin of car (categorical: american, european, asian)
                 
                 Domain context:
-                - Different iris species have characteristic sepal and petal dimensions
-                - Petal dimensions tend to be correlated with sepal dimensions
-                - Setosa species has the smallest petals but relatively wide sepals
-                - Virginica species has the largest petals and sepals
-                - There are allometric relationships between different flower parts
+                - Fuel efficiency (MPG) generally decreases with vehicle weight
+                - Higher horsepower engines typically consume more fuel
+                - Larger engine displacement generally correlates with lower MPG
+                - Cars with more cylinders typically have lower fuel efficiency
+                - Technological improvements over model years generally increased fuel efficiency
+                - There are tradeoffs between performance (acceleration) and fuel efficiency
+                - Different regions (origins) had different emission standards and design philosophies
+                - The dataset contains cars from the 1970s and early 1980s during fuel crises
                 """,
                 is_classification=False
             )
@@ -270,8 +307,8 @@ def test_iris_integration(use_mock):
         pipeline_no_domain.domain_extractor = domain_extractor
         result_no_domain = pipeline_no_domain.run(
             data=data,
-            target_column='sepal_length',
-            problem_description="Regression problem predicting sepal length",
+            target_column='mpg',
+            problem_description="Regression problem predicting miles per gallon (MPG) of automobiles",
             is_classification=False
         )
         
@@ -279,21 +316,27 @@ def test_iris_integration(use_mock):
         pipeline_with_domain.domain_extractor = domain_extractor
         result_with_domain = pipeline_with_domain.run(
             data=data,
-            target_column='sepal_length',
+            target_column='mpg',
             problem_description="""
-            Regression problem predicting sepal length of iris flowers.
+            Regression problem predicting miles per gallon (MPG) of automobiles.
             Features:
-            - sepal_width: Width of the sepal in cm
-            - petal_length: Length of the petal in cm
-            - petal_width: Width of the petal in cm
-            - species: Type of iris (setosa, versicolor, virginica)
+            - cylinders: Number of cylinders in the engine (integer)
+            - displacement: Engine displacement in cubic inches (continuous)
+            - horsepower: Engine horsepower (continuous)
+            - weight: Vehicle weight in pounds (continuous)
+            - acceleration: Time to accelerate from 0 to 60 mph in seconds (continuous)
+            - model_year: Vehicle model year (integer, 70-82 representing 1970-1982)
+            - origin: Origin of car (categorical: american, european, asian)
             
             Domain context:
-            - Different iris species have characteristic sepal and petal dimensions
-            - Petal dimensions tend to be correlated with sepal dimensions
-            - Setosa species has the smallest petals but relatively wide sepals
-            - Virginica species has the largest petals and sepals
-            - There are allometric relationships between different flower parts
+            - Fuel efficiency (MPG) generally decreases with vehicle weight
+            - Higher horsepower engines typically consume more fuel
+            - Larger engine displacement generally correlates with lower MPG
+            - Cars with more cylinders typically have lower fuel efficiency
+            - Technological improvements over model years generally increased fuel efficiency
+            - There are tradeoffs between performance (acceleration) and fuel efficiency
+            - Different regions (origins) had different emission standards and design philosophies
+            - The dataset contains cars from the 1970s and early 1980s during fuel crises
             """,
             is_classification=False
         )
@@ -306,10 +349,10 @@ def test_iris_integration(use_mock):
     with_domain_features = result_with_domain.transformed_data
     
     # Drop the target column if it exists in the transformed data
-    if 'sepal_length' in no_domain_features.columns:
-        no_domain_features = no_domain_features.drop('sepal_length', axis=1)
-    if 'sepal_length' in with_domain_features.columns:
-        with_domain_features = with_domain_features.drop('sepal_length', axis=1)
+    if 'mpg' in no_domain_features.columns:
+        no_domain_features = no_domain_features.drop('mpg', axis=1)
+    if 'mpg' in with_domain_features.columns:
+        with_domain_features = with_domain_features.drop('mpg', axis=1)
     
     # Print feature information for debugging
     print("\nNo Domain Features Shape:", no_domain_features.shape)
@@ -373,4 +416,4 @@ def test_iris_integration(use_mock):
         'faster_with_domain': faster_with_domain_scores
     }
     
-    print("\nAll performance metrics:", all_scores)
+    print("\nAll performance metrics:", all_scores) 
