@@ -383,7 +383,10 @@ class FeatureSelector:
                 gamma=1,
                 reg_alpha=0.1,
                 reg_lambda=1,
-                random_state=self.random_state
+                random_state=self.random_state,
+                # Enable early stopping in newer XGBoost versions
+                enable_categorical=True,
+                use_label_encoder=False
             )
             linear_model = LogisticRegression(random_state=self.random_state, penalty='l1', solver='liblinear', C=1.0)
         else:
@@ -398,7 +401,9 @@ class FeatureSelector:
                 gamma=1,
                 reg_alpha=0.1,
                 reg_lambda=1,
-                random_state=self.random_state
+                random_state=self.random_state,
+                # Enable early stopping in newer XGBoost versions
+                enable_categorical=True
             )
             linear_model = Lasso(alpha=0.01, random_state=self.random_state)
         
@@ -417,17 +422,34 @@ class FeatureSelector:
                 xgb_clone = clone(xgb_model)
                 # Enable early stopping
                 try:
-                    # First attempt using newer XGBoost API
-                    xgb_clone.fit(
-                        X_train, y_train,
-                        eval_set=[(X_test, y_test)],
-                        early_stopping_rounds=10,
-                        verbose=False
-                    )
+                    # First attempt with modern XGBoost API (2.0+)
+                    xgb_version = xgb.__version__
+                    major_version = 0
+                    try:
+                        major_version = int(xgb_version.split('.')[0])
+                    except (ValueError, IndexError) as ve:
+                        logger.warning(f"Error parsing XGBoost version: {str(ve)}")
+                    
+                    if major_version >= 2:
+                        # XGBoost 2.0+ approach
+                        xgb_clone.fit(
+                            X_train, y_train,
+                            eval_set=[(X_test, y_test)],
+                            early_stopping_rounds=10,
+                            verbose=False
+                        )
+                    else:
+                        # Pre-2.0 approach
+                        xgb_clone.fit(
+                            X_train, y_train,
+                            eval_set=[(X_test, y_test)],
+                            early_stopping_rounds=10,
+                            verbose=False
+                        )
                 except TypeError as e:
                     if "early_stopping_rounds" in str(e):
                         logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
-                        # Fallback to older XGBoost API or modified approach
+                        # Fallback to using just eval_set without early_stopping_rounds
                         xgb_clone.fit(
                             X_train, y_train,
                             eval_set=[(X_test, y_test)],
@@ -474,7 +496,16 @@ class FeatureSelector:
             # Fall back to single XGBoost model importance
             try:
                 # Use a simpler model for fallback
-                simple_xgb = xgb.XGBClassifier(n_estimators=50, random_state=self.random_state) if is_classification else xgb.XGBRegressor(n_estimators=50, random_state=self.random_state)
+                simple_xgb = xgb.XGBClassifier(
+                    n_estimators=50, 
+                    random_state=self.random_state,
+                    enable_categorical=True,
+                    use_label_encoder=False
+                ) if is_classification else xgb.XGBRegressor(
+                    n_estimators=50, 
+                    random_state=self.random_state,
+                    enable_categorical=True
+                )
                 simple_xgb.fit(features, target)
                 xgb_importances = simple_xgb.feature_importances_ * self.criteria.cv_folds
             except Exception as fallback_error:

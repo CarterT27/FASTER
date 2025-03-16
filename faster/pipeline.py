@@ -594,7 +594,9 @@ class Pipeline:
                     gamma=1,  # Minimum loss reduction for split
                     reg_alpha=0.1,  # L1 regularization
                     reg_lambda=1,  # L2 regularization
-                    random_state=42
+                    random_state=42,
+                    enable_categorical=True,
+                    use_label_encoder=False
                 )
                 cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
                 if len(np.unique(y)) == 2:  # Binary classification
@@ -612,7 +614,8 @@ class Pipeline:
                     gamma=1,
                     reg_alpha=0.1,
                     reg_lambda=1,
-                    random_state=42
+                    random_state=42,
+                    enable_categorical=True
                 )
                 cv = KFold(n_splits=5, shuffle=True, random_state=42)
                 scoring = ['r2', 'neg_mean_absolute_error', 'neg_root_mean_squared_error']
@@ -702,8 +705,21 @@ class Pipeline:
                     
                     # Train model without early stopping
                     try:
+                        # Get XGBoost version
+                        xgb_version = xgb.__version__
+                        major_version = 0
+                        try:
+                            major_version = int(xgb_version.split('.')[0])
+                        except (ValueError, IndexError) as ve:
+                            logger.warning(f"Error parsing XGBoost version: {str(ve)}")
+                        
                         # First attempt using normal fit
-                        model.fit(X_train, y_train)
+                        if major_version >= 2:
+                            # XGBoost 2.0+ approach
+                            model.fit(X_train, y_train)
+                        else:
+                            # Pre-2.0 approach
+                            model.fit(X_train, y_train)
                     except Exception as fit_error:
                         logger.error(f"Error in model fitting: {str(fit_error)}")
                         # Very simplified model

@@ -658,7 +658,9 @@ class FeatureGenerator:
                         'gamma': 1,
                         'reg_alpha': 0.1,
                         'reg_lambda': 1,
-                        'random_state': 42
+                        'random_state': 42,
+                        'enable_categorical': True,
+                        'use_label_encoder': False
                     }
                 else:
                     scoring_func = accuracy_score
@@ -673,7 +675,9 @@ class FeatureGenerator:
                         'gamma': 1,
                         'reg_alpha': 0.1,
                         'reg_lambda': 1,
-                        'random_state': 42
+                        'random_state': 42,
+                        'enable_categorical': True,
+                        'use_label_encoder': False
                     }
             else:
                 scoring_func = r2_score
@@ -688,7 +692,8 @@ class FeatureGenerator:
                     'gamma': 1,
                     'reg_alpha': 0.1,
                     'reg_lambda': 1,
-                    'random_state': 42
+                    'random_state': 42,
+                    'enable_categorical': True
                 }
             
             # Train baseline model on original features with early stopping
@@ -700,18 +705,36 @@ class FeatureGenerator:
             
             # Fit with early stopping to prevent overfitting
             try:
-                # First attempt using newer XGBoost API
-                baseline_model.fit(
-                    X_train, y_train,
-                    eval_set=[(X_val_orig, y_val)],
-                    early_stopping_rounds=5,
-                    eval_metric=eval_metric,
-                    verbose=False
-                )
+                # Check XGBoost version to use appropriate API
+                xgb_version = xgb.__version__
+                major_version = 0
+                try:
+                    major_version = int(xgb_version.split('.')[0])
+                except (ValueError, IndexError) as ve:
+                    logger.warning(f"Error parsing XGBoost version: {str(ve)}")
+                
+                if major_version >= 2:
+                    # XGBoost 2.0+ approach
+                    baseline_model.fit(
+                        X_train, y_train,
+                        eval_set=[(X_val_orig, y_val)],
+                        early_stopping_rounds=5,
+                        eval_metric=eval_metric,
+                        verbose=False
+                    )
+                else:
+                    # Pre-2.0 approach 
+                    baseline_model.fit(
+                        X_train, y_train,
+                        eval_set=[(X_val_orig, y_val)],
+                        early_stopping_rounds=5,
+                        eval_metric=eval_metric,
+                        verbose=False
+                    )
             except TypeError as e:
                 if "early_stopping_rounds" in str(e):
                     logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
-                    # Fallback to older XGBoost API or modified approach
+                    # Fallback to using just eval_set without early_stopping_rounds
                     baseline_model.fit(
                         X_train, y_train,
                         eval_set=[(X_val_orig, y_val)],
@@ -762,18 +785,36 @@ class FeatureGenerator:
                 
                 # Fit model with early stopping
                 try:
-                    # First attempt using newer XGBoost API
-                    eval_model.fit(
-                        X_train_trans, y_train,
-                        eval_set=[(X_val_trans, y_val)],
-                        early_stopping_rounds=5,
-                        eval_metric=eval_metric,
-                        verbose=False
-                    )
+                    # Check XGBoost version to use appropriate API
+                    xgb_version = xgb.__version__
+                    major_version = 0
+                    try:
+                        major_version = int(xgb_version.split('.')[0])
+                    except (ValueError, IndexError) as ve:
+                        logger.warning(f"Error parsing XGBoost version: {str(ve)}")
+                    
+                    if major_version >= 2:
+                        # XGBoost 2.0+ approach
+                        eval_model.fit(
+                            X_train_trans, y_train,
+                            eval_set=[(X_val_trans, y_val)],
+                            early_stopping_rounds=5,
+                            eval_metric=eval_metric,
+                            verbose=False
+                        )
+                    else:
+                        # Pre-2.0 approach
+                        eval_model.fit(
+                            X_train_trans, y_train,
+                            eval_set=[(X_val_trans, y_val)],
+                            early_stopping_rounds=5,
+                            eval_metric=eval_metric,
+                            verbose=False
+                        )
                 except TypeError as e:
                     if "early_stopping_rounds" in str(e):
                         logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
-                        # Fallback to older XGBoost API or modified approach
+                        # Fallback to using just eval_set without early_stopping_rounds
                         eval_model.fit(
                             X_train_trans, y_train,
                             eval_set=[(X_val_trans, y_val)],
