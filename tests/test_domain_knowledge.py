@@ -10,8 +10,58 @@ import httpx
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from pydantic import ValidationError
+import logging
 
 from faster.domain_knowledge import DomainKnowledgeExtractor, DomainInsight, PromptConfig
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def verify_openrouter_api_key() -> str:
+    """
+    Verify and retrieve the OpenRouter API key.
+    
+    Returns:
+        str: Validated API key or raises a pytest.skip exception
+    """
+    # Check if API key exists in environment
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    
+    if not api_key:
+        pytest.skip("Skipping non-mock test: OPENROUTER_API_KEY environment variable not set")
+    
+    # Validate API key format
+    if not api_key.startswith("sk-"):
+        logger.warning("Warning: OpenRouter API key does not start with 'sk-'. Key may be invalid.")
+    
+    # Check for obvious placeholder values
+    placeholder_terms = ["dummy", "test", "placeholder", "your_key", "example"]
+    if any(term in api_key.lower() for term in placeholder_terms):
+        pytest.skip(f"Skipping non-mock test: OPENROUTER_API_KEY appears to be a placeholder value")
+    
+    # Log (masked) key information for debugging
+    masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
+    logger.info(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
+    
+    return api_key
+
+def configure_openai_client(api_key: str) -> OpenAI:
+    """
+    Configure and return an OpenAI client configured for OpenRouter.
+    
+    Args:
+        api_key: The OpenRouter API key
+        
+    Returns:
+        openai.OpenAI: Configured client
+    """
+    logger.info(f"Configuring OpenAI client with base URL: https://openrouter.ai/api/v1")
+    
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
 
 @pytest.fixture
 def sample_data():
@@ -52,6 +102,40 @@ def mock_llm_response():
 @pytest.fixture
 def domain_extractor():
     """Create a DomainKnowledgeExtractor instance."""
+    # Try to use real API if available, otherwise use mock
+    try:
+        # Verify and get API key
+        api_key = verify_openrouter_api_key()
+        
+        # Configure OpenAI client
+        client = configure_openai_client(api_key)
+        
+        # Test the client with a simple query to verify credentials work
+        try:
+            response = client.chat.completions.create(
+                model="deepseek/deepseek-chat:free",
+                messages=[{"role": "user", "content": "Hello, this is a test"}],
+                temperature=0.0,
+                max_tokens=10
+            )
+            logger.info("OpenRouter API test successful")
+            
+            # Create extractor with the working client
+            extractor = DomainKnowledgeExtractor(
+                model_name="deepseek/deepseek-chat:free",
+                temperature=0.0,
+                api_key=api_key
+            )
+            return extractor
+            
+        except Exception as e:
+            logger.error(f"OpenRouter API test failed: {str(e)}")
+            # Fall back to mock if API test fails
+    except Exception:
+        # Fall back to mock if API key verification fails
+        pass
+    
+    # Use mock if real API is not available
     with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'dummy_key'}):
         # Use a mock to avoid actual API calls
         with patch('openai.OpenAI') as mock_openai:

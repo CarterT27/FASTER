@@ -157,21 +157,12 @@ def configure_openai_client(api_key: str) -> openai.OpenAI:
     Returns:
         openai.OpenAI: Configured client
     """
-    # Ensure key is properly formatted for Authorization header
-    if not api_key.startswith("Bearer ") and not api_key.startswith("bearer "):
-        auth_header = f"Bearer {api_key}"
-    else:
-        auth_header = api_key
-        
+    
     logger.info(f"Configuring OpenAI client with base URL: https://openrouter.ai/api/v1")
     
     return openai.OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
-        default_headers={
-            "HTTP-Referer": "https://github.com/CarterT27/FASTER",  # Project repository
-            "X-Title": "FASTER Integration Tests",
-        }
     )
 
 @pytest.mark.parametrize("use_mock", [True, False])
@@ -222,6 +213,7 @@ def test_iris_integration(use_mock):
         selection_criteria=SelectionCriteria(),
         output_dir=None,
         save_intermediate=False,
+        categorical_encoding="dummy",
     )
 
     if use_mock:
@@ -265,8 +257,7 @@ def test_iris_integration(use_mock):
         domain_extractor = DomainKnowledgeExtractor(
             model_name=config.model_name,
             temperature=config.temperature,
-            api_key=api_key,
-            openai_client=client
+            api_key=api_key
         )
         
         # Create pipelines with configured domain extractor

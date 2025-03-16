@@ -5,13 +5,17 @@ from dataclasses import dataclass
 import logging
 import json
 from pathlib import Path
+import time
+import uuid
+import datetime
+import traceback
 
 import pandas as pd
 from pydantic import BaseModel
 
 from faster.domain_knowledge import DomainKnowledgeExtractor
 from faster.feature_generation import FeatureGenerator, TransformationMetadata
-from faster.statistical_evaluation import StatisticalEvaluator
+from faster.statistical_evaluation import StatisticalEvaluator, FeatureStatistics
 from faster.feature_selection import FeatureSelector, SelectionCriteria, SelectionResult
 from faster.utils.logging import get_logger, setup_logging
 
@@ -96,71 +100,174 @@ class Pipeline:
         domain_context: Optional[str] = None,
         is_classification: bool = True,
     ) -> PipelineResult:
-        """Run the feature engineering pipeline.
+        """
+        Run the FASTER pipeline.
         
         Args:
-            data: Input DataFrame
-            target_column: Name of target variable
-            problem_description: Description of the ML problem
-            categorical_columns: List of categorical column names
-            domain_context: Optional domain-specific context
-            is_classification: Whether this is a classification task
+            data (pd.DataFrame): Input data
+            target_column (str): Target column name
+            problem_description (str): Description of the problem
+            categorical_columns (List[str], optional): List of categorical columns
+            domain_context (str, optional): Additional domain context
+            is_classification (bool): Whether this is a classification problem
             
         Returns:
-            Pipeline results including transformed data and metadata
+            PipelineResult: Results from the pipeline
         """
-        logger.info("Starting FASTER pipeline")
-        execution_log = {}
-        
         try:
+            start_time = time.time()
+            logger.info("Starting FASTER pipeline")
+            
             # Validate inputs
-            if not problem_description:
-                raise ValueError("Problem description cannot be empty")
+            if data is None:
+                logger.error("Data cannot be None")
+                raise ValueError("Data cannot be None")
                 
-            # Extract domain knowledge
+            if not target_column:
+                logger.error("Target column cannot be empty")
+                raise ValueError("Target column cannot be empty")
+                
+            if not problem_description:
+                logger.error("Problem description cannot be empty")
+                raise ValueError("Problem description cannot be empty")
+            
+            # Create a copy of the data to avoid modifying the original
+            data = data.copy()
+            
+            # If domain context is not provided, use problem_description
+            if domain_context is None:
+                domain_context = problem_description
+            
+            # Track execution logs
+            execution_log = {}
+            
+            # Step 1: Extract domain knowledge
             logger.info("Extracting domain knowledge")
-            domain_insights = self.domain_extractor.extract_knowledge(
-                data,
-                target_column,
-                problem_description,
-                domain_context,
-                categorical_columns=categorical_columns,
-            )
+            domain_insights = []
+            domain_error = None
+            
+            try:
+                # Use the request ID for tracking
+                request_id = str(uuid.uuid4())
+                domain_insights = self.domain_extractor.extract_knowledge(
+                    data=data,
+                    target_column=target_column,
+                    problem_description=domain_context,
+                    request_id=request_id,
+                )
+                execution_log["domain_extraction"] = {
+                    "status": "success",
+                    "request_id": request_id,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
+            except Exception as e:
+                # Log the error but continue with an empty domain insights list
+                domain_error = str(e)
+                logger.error(f"Error in domain knowledge extraction: {domain_error}")
+                domain_insights = []
+                execution_log["domain_extraction"] = {
+                    "status": "error",
+                    "error": domain_error,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
             
             if self.config.save_intermediate:
-                self._save_intermediate("domain_insights.json", domain_insights)
+                self._save_intermediate("domain_insights.json", [insight.dict() for insight in domain_insights])
             
             # Step 2: Generate features
             logger.info("Generating features")
-            transformed_data = self.feature_generator.generate_features(
-                data,
-                domain_insights,
-                target_column,
-                is_classification,
-            )
+            transformed_data = data.copy()
+            generation_error = None
+            
+            try:
+                transformed_data = self.feature_generator.generate_features(
+                    data=data,
+                    domain_insights=domain_insights,
+                    target_column=target_column,
+                    is_classification=is_classification,
+                )
+                execution_log["feature_generation"] = {
+                    "status": "success",
+                    "features_added": len(transformed_data.columns) - len(data.columns),
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
+            except Exception as e:
+                generation_error = str(e)
+                logger.error(f"Error in feature generation: {generation_error}")
+                # Fall back to original data if feature generation fails
+                transformed_data = data.copy()
+                execution_log["feature_generation"] = {
+                    "status": "error",
+                    "error": generation_error,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
             
             if self.config.save_intermediate:
                 self._save_intermediate("transformed_data.csv", transformed_data)
             
             # Step 3: Evaluate features
             logger.info("Evaluating features")
-            feature_stats = self.statistical_evaluator.evaluate_features(
-                transformed_data,
-                target_column,
-                categorical_columns,
-            )
+            feature_stats = []
+            evaluation_error = None
+            
+            try:
+                feature_stats = self.statistical_evaluator.evaluate_features(
+                    transformed_data,
+                    target_column,
+                    categorical_columns,
+                )
+                execution_log["feature_evaluation"] = {
+                    "status": "success",
+                    "features_evaluated": len(feature_stats),
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
+            except Exception as e:
+                evaluation_error = str(e)
+                logger.error(f"Error in feature evaluation: {evaluation_error}")
+                # Create minimal feature stats if evaluation fails
+                feature_stats = self._create_fallback_feature_stats(transformed_data, target_column)
+                execution_log["feature_evaluation"] = {
+                    "status": "error",
+                    "error": evaluation_error,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
             
             if self.config.save_intermediate:
                 self._save_intermediate("feature_stats.json", feature_stats)
             
             # Step 4: Select features
             logger.info("Selecting features")
-            selection_result = self.feature_selector.select_features(
-                transformed_data,
-                target_column,
-                feature_stats,
-                is_classification,
-            )
+            selection_result = None
+            selection_error = None
+            
+            try:
+                selection_result = self.feature_selector.select_features(
+                    transformed_data,
+                    target_column,
+                    feature_stats,
+                    is_classification,
+                )
+                execution_log["feature_selection"] = {
+                    "status": "success",
+                    "features_selected": len(selection_result.selected_features),
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
+            except Exception as e:
+                selection_error = str(e)
+                logger.error(f"Error in feature selection: {selection_error}")
+                # Create a fallback selection result with all columns except target
+                all_features = [col for col in transformed_data.columns if col != target_column]
+                selection_result = SelectionResult(
+                    selected_features=all_features,
+                    selection_scores={},
+                    removed_features={},
+                    statistics={f: FeatureStatistics(name=f) for f in all_features}
+                )
+                execution_log["feature_selection"] = {
+                    "status": "error",
+                    "error": selection_error,
+                    "timestamp": datetime.datetime.now().isoformat(),
+                }
             
             # Prepare results
             final_data = transformed_data[
@@ -172,12 +279,18 @@ class Pipeline:
                 self.feature_generator.transformations,
             )
             
+            # Calculate performance metrics
             performance_metrics = self._calculate_performance_metrics(
                 final_data,
                 target_column,
                 is_classification,
             )
             
+            # Add pipeline execution time
+            execution_time = time.time() - start_time
+            execution_log["total_execution_time"] = execution_time
+            
+            # Create pipeline result
             result = PipelineResult(
                 transformed_data=final_data,
                 selected_features=selection_result.selected_features,
@@ -186,16 +299,35 @@ class Pipeline:
                 execution_log=execution_log,
             )
             
-            # Save final results
+            # Save results if output_dir is specified
             if self.config.output_dir:
                 self._save_results(result)
             
-            logger.info("Pipeline completed successfully")
             return result
             
         except Exception as e:
-            logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
+            # Catch any uncaught exceptions in the pipeline
+            logger.error(f"Pipeline failed: {str(e)}")
+            logger.error(traceback.format_exc())
             raise
+    
+    def _create_fallback_feature_stats(self, data: pd.DataFrame, target_column: str) -> List[FeatureStatistics]:
+        """Create minimal feature statistics when evaluation fails."""
+        features = [col for col in data.columns if col != target_column]
+        stats = []
+        
+        for feature in features:
+            # Create a minimal FeatureStatistics object
+            stat = FeatureStatistics(
+                name=feature,
+                p_value=0.5,  # Neutral p-value
+                effect_size=0.0,
+                predictive_power=0.0,
+                is_categorical=not pd.api.types.is_numeric_dtype(data[feature])
+            )
+            stats.append(stat)
+        
+        return stats
     
     def _save_intermediate(self, filename: str, data: Union[pd.DataFrame, dict]) -> None:
         """Save intermediate results."""

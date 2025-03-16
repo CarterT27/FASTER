@@ -428,22 +428,48 @@ class FeatureGenerator:
                         new_feature_name = f"binned_{feature}_{n_bins}"
                         
                         try:
-                            result_df[new_feature_name] = pd.qcut(
-                                data[feature],
-                                q=n_bins,
-                                labels=[f"bin_{i}" for i in range(n_bins)],
+                            # Create both categorical and numeric versions of binned features
+                            # Numeric version is more compatible with statistical methods
+                            # First create bins without labels
+                            bins, bin_edges = pd.qcut(
+                                data[feature], 
+                                q=n_bins, 
+                                retbins=True, 
                                 duplicates='drop'
                             )
+                            
+                            # Create numeric binned feature (bin index as number)
+                            result_df[new_feature_name] = bins.codes
+                            
+                            # Also create a categorical version for interpretability if needed
+                            cat_feature_name = f"binned_{feature}_{n_bins}_cat"
+                            result_df[cat_feature_name] = pd.qcut(
+                                data[feature],
+                                q=n_bins,
+                                labels=[f"bin_{i}" for i in range(len(bin_edges)-1)],
+                                duplicates='drop'
+                            )
+                            
                             transformed_features.add(feature)
+                            
+                            # Record bin edges for later reference
+                            bin_ranges = [f"{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}" 
+                                        for i in range(len(bin_edges)-1)]
+                            
                             self.transformations[new_feature_name] = TransformationMetadata(
                                 original_features=[feature],
                                 transformation_type="binning",
-                                parameters={"n_bins": n_bins},
+                                parameters={
+                                    "n_bins": n_bins,
+                                    "bin_edges": bin_edges.tolist(),
+                                    "bin_labels": [f"bin_{i}" for i in range(len(bin_edges)-1)],
+                                    "bin_ranges": bin_ranges
+                                },
                                 rationale=insight.rationale,
                             )
                             logger.info(f"Applied binning transform to {feature}")
                         except Exception as e:
-                            logger.warning(f"Failed to bin feature {feature}: {str(e)}")
+                            logger.warning(f"Error applying binning to {feature}: {str(e)}")
                     
                     elif transform.startswith("zscore") and feature not in transformed_features:
                         # Z-score normalization

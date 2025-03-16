@@ -205,43 +205,98 @@ class FeatureSelector:
         candidates: Set[str],
         removed: Dict[str, str],
     ) -> Set[str]:
-        """Remove highly correlated features with improved algorithm."""
-        result = candidates.copy()
+        """
+        Filter out highly correlated features.
         
-        # Calculate correlation matrix
-        corr_matrix = data.corr().abs()
+        Args:
+            data (DataFrame): Input dataframe
+            candidates (Set[str]): Set of candidate feature names
+            removed (Dict[str, str]): Dict to track removed features and reasons
+            
+        Returns:
+            Set[str]: Filtered set of feature names
+        """
+        if len(candidates) <= 1:
+            return candidates
+
+        # Create a copy of the data for numeric features only
+        # and convert categorical columns to numeric where possible
+        numeric_data = pd.DataFrame()
+        categorical_columns = []
+        
+        for col in candidates:
+            if col not in data.columns:
+                continue
+                
+            col_data = data[col]
+            
+            # Check if column is categorical
+            if pd.api.types.is_categorical_dtype(col_data) or pd.api.types.is_object_dtype(col_data):
+                categorical_columns.append(col)
+                # Skip categorical columns for correlation analysis
+                continue
+            
+            # Skip any other non-numeric columns
+            if not pd.api.types.is_numeric_dtype(col_data):
+                self.logger.warning(f"Column {col} is not numeric and will be excluded from correlation analysis")
+                categorical_columns.append(col)
+                continue
+                
+            numeric_data[col] = col_data
+        
+        # If no numeric features left, return all candidates
+        if numeric_data.empty or len(numeric_data.columns) <= 1:
+            self.logger.info("Insufficient numeric features for correlation analysis")
+            return candidates
+        
+        # Compute correlation matrix for numeric features
+        try:
+            corr_matrix = numeric_data.corr(method='pearson')
+        except Exception as e:
+            self.logger.warning(f"Could not compute correlation matrix: {str(e)}. Skipping correlation filtering.")
+            return candidates
         
         # Sort features by their average correlation with other features
         avg_corr = corr_matrix.mean().sort_values(ascending=False)
         
         # Iteratively remove highly correlated features
         for feature in avg_corr.index:
-            if feature not in result:
+            if feature not in candidates:
                 continue
                 
             correlated_features = []
             
-            for other_feature in result:
-                if feature != other_feature and corr_matrix.loc[feature, other_feature] > self.criteria.max_correlation:
+            for other_feature in avg_corr.index:
+                if feature != other_feature and other_feature in candidates and corr_matrix.loc[feature, other_feature] > self.criteria.max_correlation:
                     correlated_features.append(other_feature)
             
             if correlated_features:
-                # Compare feature importance/usefulness using mutual information or effect size
+                # Compare feature importance/usefulness using variance ratio
                 keep_feature = feature
                 for corr_feature in correlated_features:
-                    # If correlated feature has significantly higher variance, keep it instead
-                    var_ratio = data[corr_feature].var() / data[feature].var()
-                    if var_ratio > 1.5:  # Significantly higher variance
-                        keep_feature = corr_feature
-                        break
+                    try:
+                        # Only compute variance ratio for numeric features
+                        if (feature in numeric_data.columns and 
+                            corr_feature in numeric_data.columns):
+                            var_ratio = numeric_data[corr_feature].var() / numeric_data[feature].var()
+                            if var_ratio > 1.5:  # Significantly higher variance
+                                keep_feature = corr_feature
+                                break
+                    except Exception as e:
+                        self.logger.warning(f"Error computing variance ratio for {feature} and {corr_feature}: {str(e)}")
+                        # If we can't compare, keep the original feature
                 
                 # Remove all correlated features except the one to keep
                 for f in correlated_features + [feature]:
-                    if f != keep_feature and f in result:
-                        removed[f] = f"high correlation with {keep_feature} ({corr_matrix.loc[f, keep_feature]:.4f})"
-                        result.remove(f)
+                    if f != keep_feature and f in candidates:
+                        corr_value = corr_matrix.loc[f, keep_feature] if f in corr_matrix.index and keep_feature in corr_matrix.columns else float('nan')
+                        removed[f] = f"high correlation with {keep_feature} ({corr_value:.4f})"
+                        candidates.remove(f)
         
-        return result
+        # Add back categorical columns that were excluded from correlation analysis
+        candidates = candidates.union(set(categorical_columns).intersection(set(data.columns)))
+        
+        return candidates
     
     def _check_multicollinearity(
         self, 

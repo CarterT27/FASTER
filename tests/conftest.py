@@ -19,21 +19,27 @@ def setup_logging():
 @pytest.fixture(autouse=True)
 def setup_test_env():
     """Set up test environment variables."""
-    # Only set a default value if the environment variable doesn't exist
-    if 'OPENROUTER_API_KEY' not in os.environ:
-        os.environ['OPENROUTER_API_KEY'] = 'dummy_key_for_testing'
-    
-    # Store the original value to restore later
+    # Store any existing API key
     original_api_key = os.environ.get('OPENROUTER_API_KEY')
+    
+    # Only set a dummy key if one doesn't exist
+    if not original_api_key:
+        os.environ['OPENROUTER_API_KEY'] = 'dummy_key_for_testing'
     
     # Clean up after tests
     yield
     
-    # Restore the original value if it existed
-    if original_api_key:
+    # Only reset to dummy or remove if we had to add a dummy key
+    if not original_api_key:
+        if os.environ.get('OPENROUTER_API_KEY') != 'dummy_key_for_testing':
+            # If a real key was added during the test, preserve it
+            pass
+        else:
+            # If it's still our dummy key, remove it
+            del os.environ['OPENROUTER_API_KEY']
+    else:
+        # Ensure the original key is restored
         os.environ['OPENROUTER_API_KEY'] = original_api_key
-    elif 'OPENROUTER_API_KEY' in os.environ:
-        del os.environ['OPENROUTER_API_KEY']
 
 @pytest.fixture
 def numeric_data():

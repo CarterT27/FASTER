@@ -91,49 +91,127 @@ class DomainKnowledgeExtractor:
         data: pd.DataFrame,
         target_column: str,
         problem_description: str,
+        request_id: Optional[str] = None,
         domain_context: Optional[str] = None,
         categorical_columns: Optional[List[str]] = None,
     ) -> List[DomainInsight]:
-        """Extract domain knowledge about features from the dataset.
+        """
+        Extract domain knowledge and feature insights.
         
         Args:
-            data: Input DataFrame
-            target_column: Name of the target variable
-            problem_description: Description of the ML problem
-            domain_context: Optional additional domain context
-            categorical_columns: Optional list of categorical column names
+            data (pd.DataFrame): Input data
+            target_column (str): Target column name
+            problem_description (str): Description of the problem
+            request_id (str, optional): Unique ID to track this request
+            domain_context (str, optional): Additional domain context
+            categorical_columns (List[str], optional): List of categorical columns
             
         Returns:
-            List of domain insights about features
+            List[DomainInsight]: List of domain insights
         """
-        validate_dataframe(data, target_column, categorical_columns=categorical_columns)
-        request_id = str(uuid.uuid4())
+        # Generate a request ID if not provided
+        if request_id is None:
+            request_id = str(uuid.uuid4())
+            
         logger.info(f"Starting domain knowledge extraction with request ID: {request_id}")
         
+        # Ensure data quality
+        if data.empty:
+            logger.warning("Empty dataset provided, returning empty insights")
+            return []
+            
+        # Handle missing target column
+        if target_column not in data.columns:
+            logger.error(f"Target column '{target_column}' not found in data")
+            return []
+            
+        # Auto-detect categorical columns if not provided
+        if categorical_columns is None:
+            categorical_columns = []
+            for col in data.columns:
+                if col == target_column:
+                    continue
+                    
+                if pd.api.types.is_categorical_dtype(data[col]) or pd.api.types.is_object_dtype(data[col]):
+                    categorical_columns.append(col)
+                # Also detect low-cardinality numeric features as potential categorical features
+                elif pd.api.types.is_numeric_dtype(data[col]) and data[col].nunique() < 10:
+                    categorical_columns.append(col)
+        
+        # Generate data summary for LLM context
         try:
-            # Generate dataset summary
-            data_summary = self._generate_data_summary(data, target_column)
-            
-            # Create context prompt
-            context_prompt = ChatPromptTemplate.from_template(
-                self.prompt_config.context_template
-            ).format(
-                data_summary=data_summary,
-                problem_description=problem_description,
-                domain_context=domain_context or "",
+            data_summary = self._generate_data_summary(
+                data, 
+                target_column
             )
+        except Exception as e:
+            logger.error(f"Error generating data summary: {str(e)}")
+            # Create minimal data summary
+            data_summary = {
+                "n_rows": len(data),
+                "n_columns": len(data.columns),
+                "features": list(data.columns),
+                "data_types": {col: str(data[col].dtype) for col in data.columns},
+                "categorical_columns": categorical_columns,
+                "target": target_column
+            }
+        
+        # Create prompt for LLM
+        # Add domain context to problem description if provided
+        full_context = problem_description
+        if domain_context:
+            full_context += f"\n\nAdditional context: {domain_context}"
             
-            # Get initial insights
-            insights = self._query_llm_with_retry(context_prompt)
+        prompt = self.prompt_config.context_template.format(
+            data_summary=json.dumps(data_summary, indent=2),
+            problem_description=full_context,
+        )
+        
+        # Query LLM for insights
+        try:
+            logger.info(f"Querying LLM (attempt 1/3)")
+            response = self._query_llm_with_retry(prompt)
             
-            # Refine insights with expert prompting
-            refined_insights = self._refine_insights(insights, data)
-            
-            return [DomainInsight.model_validate(insight) for insight in refined_insights]
+            # Convert raw insights to DomainInsight objects
+            domain_insights = []
+            for raw_insight in response:
+                try:
+                    # Validate and clean the raw insight
+                    if not isinstance(raw_insight, dict):
+                        logger.warning(f"Invalid insight format: {raw_insight}")
+                        continue
+                        
+                    # Ensure all required fields are present
+                    required_fields = ["feature_name", "importance", "relationships", 
+                                      "suggested_transformations", "rationale"]
+                    if not all(field in raw_insight for field in required_fields):
+                        logger.warning(f"Missing required fields in insight: {raw_insight}")
+                        continue
+                        
+                    # Ensure feature actually exists in the dataset
+                    if raw_insight["feature_name"] not in data.columns:
+                        logger.warning(f"Feature {raw_insight['feature_name']} not found in dataset")
+                        continue
+                        
+                    # Create DomainInsight object
+                    insight = DomainInsight(
+                        feature_name=raw_insight["feature_name"],
+                        importance=float(raw_insight["importance"]),
+                        relationships=raw_insight["relationships"],
+                        suggested_transformations=raw_insight["suggested_transformations"],
+                        rationale=raw_insight["rationale"]
+                    )
+                    domain_insights.append(insight)
+                except Exception as insight_error:
+                    logger.warning(f"Error processing insight: {str(insight_error)}")
+                    continue
+                    
+            return domain_insights
             
         except Exception as e:
-            logger.error(f"Error in domain knowledge extraction: {str(e)}", exc_info=True)
-            raise
+            logger.error(f"Error extracting domain knowledge: {str(e)}")
+            # Return empty list on error
+            return []
     
     def _generate_data_summary(self, data: pd.DataFrame, target_column: str) -> Dict[str, Any]:
         """Generate a summary of the dataset for LLM context."""
@@ -163,14 +241,14 @@ class DomainKnowledgeExtractor:
                 logger.debug(f"Base URL: {self.client.base_url}")
                 logger.debug(f"Model: {self.model_name}")
                 
-                # Make the API call with the proper headers for OpenRouter
+                # Make the API call with the app name headers
                 response = self.client.chat.completions.create(
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=self.temperature,
                     extra_headers={
-                        "HTTP-Referer": "https://github.com/CarterT27/FASTER",  # For rankings
-                        "X-Title": "FASTER Feature Selection Tool",  # For rankings
+                        "HTTP-Referer": "https://github.com/CarterT27/FASTER",
+                        "X-Title": "FASTER Feature Selection Tool"
                     }
                 )
                 
@@ -276,20 +354,13 @@ class DomainKnowledgeExtractor:
     
     @staticmethod
     def _default_prompt_config() -> PromptConfig:
-        """Create default prompt configuration with templates for domain knowledge extraction.
-        
-        Returns:
-            PromptConfig with default templates
-        """
+        """Default prompting configuration."""
         context_template = """
         You are an expert data scientist analyzing a dataset with the following characteristics:
         {data_summary}
         
         The machine learning problem is:
         {problem_description}
-        
-        Additional domain context:
-        {domain_context}
         
         Please analyze each feature and provide insights in the following JSON format:
         [

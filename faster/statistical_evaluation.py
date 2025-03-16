@@ -88,11 +88,9 @@ class StatisticalEvaluator:
             for column in data.columns:
                 if column != target_column:
                     stats = self._evaluate_single_feature(
+                        column,
                         data[column],
                         data[target_column],
-                        column,
-                        column in categorical_columns,
-                        is_classification,
                     )
                     results.append(stats)
             
@@ -110,37 +108,53 @@ class StatisticalEvaluator:
     
     def _evaluate_single_feature(
         self,
-        feature: pd.Series,
-        target: pd.Series,
         feature_name: str,
-        is_categorical: bool,
-        is_classification: bool,
+        feature_data: pd.Series,
+        target: pd.Series,
     ) -> FeatureStatistics:
         """Evaluate statistical significance of a single feature."""
-        assumptions = self._check_assumptions(feature, target, is_categorical)
+        # Ensure feature_data is a Series, not a DataFrame
+        if isinstance(feature_data, pd.DataFrame):
+            # If it's a one-column DataFrame, convert to Series
+            if feature_data.shape[1] == 1:
+                feature_data = feature_data.iloc[:, 0]
+            else:
+                # For multi-column DataFrames, we need special handling
+                # This might be a multi-category one-hot encoded feature
+                self.logger.warning(f"Feature {feature_name} is a multi-column DataFrame. Using first column for evaluation.")
+                feature_data = feature_data.iloc[:, 0]
+        
+        # Check if feature is categorical
+        is_categorical = feature_data.dtype == 'object' or feature_data.dtype.name == 'category'
+        is_categorical = is_categorical or (
+            isinstance(feature_data, pd.Series) and 
+            feature_data.str.contains('bin_').any() if hasattr(feature_data, 'str') else False
+        )
+        
+        assumptions = self._check_assumptions(feature_data, target, is_categorical)
         warnings = []
         
-        # Choose appropriate test based on data characteristics
-        if is_categorical and is_classification:
-            correlation, p_value, effect_size = self._categorical_vs_categorical(feature, target)
+        # Handle categorical features
+        if is_categorical and self._is_classification_problem(target):
+            correlation, p_value, effect_size = self._categorical_vs_categorical(feature_data, target)
             test_method = "chi_square"
-        elif is_categorical and not is_classification:
-            correlation, p_value, effect_size = self._categorical_vs_continuous(feature, target)
+        elif is_categorical and not self._is_classification_problem(target):
+            correlation, p_value, effect_size = self._categorical_vs_continuous(feature_data, target)
             test_method = "anova"
-        elif not is_categorical and is_classification:
-            correlation, p_value, effect_size = self._continuous_vs_categorical(feature, target)
+        elif not is_categorical and self._is_classification_problem(target):
+            correlation, p_value, effect_size = self._continuous_vs_categorical(feature_data, target)
             test_method = "point_biserial"
         else:  # Both continuous
             if not assumptions["normality"]:
-                correlation, p_value, effect_size = self._nonparametric_test(feature, target)
+                correlation, p_value, effect_size = self._nonparametric_test(feature_data, target)
                 test_method = "spearman"
                 warnings.append("Non-normal distribution detected, using non-parametric test")
             else:
-                correlation, p_value, effect_size = self._parametric_test(feature, target)
+                correlation, p_value, effect_size = self._parametric_test(feature_data, target)
                 test_method = "pearson"
         
         # Calculate mutual information
-        mi_score = self._calculate_mutual_information(feature, target, is_categorical)
+        mi_score = self._calculate_mutual_information(feature_data, target, is_categorical)
         
         # Add warning for weak relationships
         if effect_size < 0.1 and p_value <= self.alpha:
@@ -217,24 +231,139 @@ class StatisticalEvaluator:
         feature: pd.Series,
         target: pd.Series,
     ) -> Tuple[float, float, float]:
-        """ANOVA for categorical feature vs continuous target."""
-        groups = []
-        for category in feature.unique():
-            group_values = target[feature == category].values
-            if len(group_values) > 0:
-                groups.append(group_values)
+        """
+        Analyze relationship between categorical feature and continuous target.
         
-        if len(groups) <= 1:
-            return None, 1.0, 0.0
+        Args:
+            feature: Categorical feature
+            target: Continuous target variable
             
-        f_stat, p_value = stats.f_oneway(*groups)
+        Returns:
+            tuple: (correlation, p_value, effect_size)
+        """
+        # Ensure feature is a Series, not a DataFrame
+        if isinstance(feature, pd.DataFrame):
+            if feature.shape[1] == 1:
+                feature = feature.iloc[:, 0]
+            else:
+                self.logger.warning(f"Multi-column categorical feature provided. Using first column.")
+                feature = feature.iloc[:, 0]
         
-        # Calculate eta-squared as effect size
-        ss_between = sum(len(group) * (np.mean(group) - np.mean(target))**2 for group in groups)
-        ss_total = sum((target - np.mean(target))**2)
-        eta_squared = ss_between / ss_total if ss_total > 0 else 0
-        
-        return None, p_value, eta_squared
+        try:
+            # Handle binned features (string values like 'bin_0', 'bin_1', etc.)
+            if pd.api.types.is_categorical_dtype(feature) or pd.api.types.is_object_dtype(feature):
+                # Create a numeric representation for the categorical feature
+                # This is useful for binned features and other ordered categories
+                
+                # First check if the feature contains bin_ pattern indicating ordered bins
+                if hasattr(feature, 'str') and isinstance(feature.iloc[0], str) and feature.str.contains('bin_').any():
+                    try:
+                        # Try to extract numeric part from bin_X format
+                        numeric_feature = pd.Series(
+                            [int(val.split('_')[1]) if isinstance(val, str) and 'bin_' in val 
+                             else float('nan') for val in feature],
+                            index=feature.index
+                        )
+                        
+                        # Use the numeric version for ANOVA
+                        return self._run_anova(numeric_feature, target)
+                    except (IndexError, ValueError, AttributeError) as e:
+                        self.logger.warning(f"Could not convert binned feature to numeric: {str(e)}")
+                        # Fall back to categorical codes
+                        pass
+                
+                # Convert to categorical codes for ANOVA
+                # This works for any categorical feature, ordered or not
+                try:
+                    numeric_feature = pd.Categorical(feature).codes
+                    
+                    # Handle case where all values are -1 (missing)
+                    if numeric_feature.max() < 0:
+                        return 0.0, 1.0, 0.0
+                        
+                    return self._run_anova(numeric_feature, target)
+                except Exception as e:
+                    self.logger.warning(f"Error converting categorical to codes: {str(e)}")
+                    # Fall back to treating all categories equally
+                    pass
+            
+            # Run standard ANOVA using scipy
+            groups = []
+            categories = []
+            
+            # Group target values by feature category
+            for category in feature.unique():
+                if pd.isna(category):
+                    continue
+                category_target = target[feature == category].dropna()
+                if len(category_target) > 0:
+                    groups.append(category_target)
+                    categories.append(category)
+            
+            # Need at least 2 groups for ANOVA
+            if len(groups) < 2:
+                return 0.0, 1.0, 0.0
+                
+            # Perform one-way ANOVA
+            try:
+                f_statistic, p_value = stats.f_oneway(*groups)
+                
+                # Calculate effect size (eta squared)
+                grand_mean = target.mean()
+                ss_total = ((target - grand_mean) ** 2).sum()
+                
+                ss_between = sum(len(group) * ((group.mean() - grand_mean) ** 2) 
+                                for group in groups)
+                
+                eta_squared = ss_between / ss_total if ss_total > 0 else 0.0
+                
+                # Convert F-statistic to correlation-like measure (sqrt of eta-squared)
+                correlation = np.sqrt(eta_squared) if not np.isnan(eta_squared) else 0.0
+                
+                return correlation, p_value, eta_squared
+            except Exception as e:
+                self.logger.warning(f"ANOVA failed: {str(e)}")
+                return 0.0, 1.0, 0.0
+                
+        except Exception as e:
+            self.logger.error(f"Error in categorical vs continuous analysis: {str(e)}")
+            return 0.0, 1.0, 0.0
+            
+    def _run_anova(self, numeric_feature: pd.Series, target: pd.Series) -> Tuple[float, float, float]:
+        """Helper method to run ANOVA on numeric representation of features."""
+        try:
+            # Group target values by numeric feature values
+            groups = []
+            for value in sorted(numeric_feature.unique()):
+                if pd.isna(value):
+                    continue
+                value_target = target[numeric_feature == value].dropna()
+                if len(value_target) > 0:
+                    groups.append(value_target)
+            
+            # Need at least 2 groups for ANOVA
+            if len(groups) < 2:
+                return 0.0, 1.0, 0.0
+                
+            # Perform one-way ANOVA
+            f_statistic, p_value = stats.f_oneway(*groups)
+            
+            # Calculate effect size (eta squared)
+            grand_mean = target.mean()
+            ss_total = ((target - grand_mean) ** 2).sum()
+            
+            ss_between = sum(len(group) * ((group.mean() - grand_mean) ** 2) 
+                            for group in groups)
+            
+            eta_squared = ss_between / ss_total if ss_total > 0 else 0.0
+            
+            # Convert to correlation-like measure
+            correlation = np.sqrt(eta_squared) if not np.isnan(eta_squared) else 0.0
+            
+            return correlation, p_value, eta_squared
+        except Exception as e:
+            self.logger.warning(f"ANOVA on numeric feature failed: {str(e)}")
+            return 0.0, 1.0, 0.0
     
     def _continuous_vs_categorical(
         self,
