@@ -26,6 +26,14 @@ FASTER is a Python framework designed to leverage Large Language Models (LLMs) f
 
 The FASTER framework has undergone several key improvements to address performance issues and enhance feature engineering capabilities:
 
+### OpenRouter API Integration
+
+- **Support for Multiple LLMs**: Full integration with OpenRouter API to access various LLM models
+- **DeepSeek Integration**: Default configured to use `deepseek/deepseek-chat:free` model
+- **Robust API Handling**: Improved error handling and logging for API interactions
+- **Request Tracking**: Track all LLM interactions with unique request IDs
+- **Response Validation**: Enhanced validation of LLM responses
+
 ### Enhanced Feature Selection
 
 - **Cross-Validation Feature Importance**: Now uses cross-validation to calculate more robust feature importance scores
@@ -53,6 +61,13 @@ The FASTER framework has undergone several key improvements to address performan
 - **Selective Transformation Application**: More selective about which transformations to apply based on domain insights
 - **Top Feature Focus**: Concentrates transformations on features identified as most important by domain knowledge
 - **Explicit Transformation Recommendations**: Better utilization of specific transformation suggestions
+
+### Testing & Reliability
+
+- **Improved Test Coverage**: Enhanced test suite with more comprehensive coverage
+- **Integration Tests**: Additional tests for end-to-end pipeline functionality
+- **Performance Benchmarks**: Tests now verify actual performance improvements
+- **Model Validation**: Validation of model improvements across different datasets
 
 These improvements have significantly enhanced the framework's ability to generate features that actually improve model performance, while reducing noise from unhelpful transformations.
 
@@ -101,6 +116,12 @@ LOG_LEVEL=INFO
 CACHE_DIR=.cache
 ```
 
+3. Obtain an OpenRouter API key:
+   - Visit [OpenRouter](https://openrouter.ai/) and create an account
+   - Generate an API key from your dashboard
+   - Add the key to your `.env` file
+   - Your API key will allow access to various LLM models, including the default `deepseek/deepseek-chat:free` model
+
 ## Project Structure
 
 ```
@@ -146,7 +167,7 @@ from faster.pipeline import PipelineConfig
 from faster.feature_selection import SelectionCriteria
 
 config = PipelineConfig(
-    model_name="deepseek/deepseek-chat:free",
+    model_name="deepseek/deepseek-chat:free",  # Default LLM model via OpenRouter
     temperature=0.0,
     max_interaction_degree=2,
     alpha=0.05,
@@ -357,10 +378,17 @@ FASTER provides custom exceptions for different error categories:
 - `FasterValidationError`: Input validation errors
 - `FasterConfigError`: Configuration errors
 - `FasterAPIError`: External API communication errors
+  - Includes specialized handling for OpenRouter API errors
+  - Retry logic for transient API issues
+  - Rate limiting detection and backoff
 - `FasterTransformError`: Feature transformation errors
 - `FasterStatisticalError`: Statistical evaluation errors
 
-All exceptions include detailed context information for debugging.
+All exceptions include detailed context information for debugging, including:
+- Timestamp of the error
+- Request ID for API calls
+- Stack trace information
+- Relevant input data (sanitized of sensitive information)
 
 ## Contributing
 
