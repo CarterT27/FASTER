@@ -314,7 +314,16 @@ def test_iris_integration(use_mock):
     # Print feature information for debugging
     print("\nNo Domain Features Shape:", no_domain_features.shape)
     print("With Domain Features Shape:", with_domain_features.shape)
-    print("\nNo Domain Features Columns:", no_domain_features.columns.tolist())
+    print("\nBaseline X Columns:")
+    print(X.columns.tolist())
+    print("\nFASTER (No Domain Knowledge) X Columns:")
+    print(no_domain_features.columns.tolist())
+    print("\nFASTER (With Domain Knowledge) X Columns:")
+    print(with_domain_features.columns.tolist())
+    print("\nFASTER (No Domain Knowledge) X Columns:")
+    print(no_domain_features.columns.tolist())
+    print("\nFASTER (With Domain Knowledge) X Columns:")
+    print(with_domain_features.columns.tolist())
     
     # Evaluate FASTER-enhanced models
     faster_no_domain_scores = evaluate_model(
