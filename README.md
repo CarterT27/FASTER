@@ -15,12 +15,14 @@ FASTER is a Python framework designed to leverage Large Language Models (LLMs) f
 - Type-safe implementation with comprehensive test coverage
 - Configurable pipeline with sensible defaults
 - Extensive documentation and examples
+- Interactive Streamlit web application for easy experimentation
 
 ## Requirements
 
 - Python 3.9+
 - [Rye](https://github.com/astral-sh/rye) (recommended) or pip
 - OpenRouter API key for LLM access
+- Streamlit (optional, for running the interactive web application)
 
 ## Recent Improvements
 
@@ -99,6 +101,9 @@ rye sync
 
 # Activate the virtual environment
 . .venv/bin/activate
+
+# Install Streamlit dependencies (optional)
+rye sync --extras=streamlit
 ```
 
 ### Using pip
@@ -114,6 +119,9 @@ source .venv/bin/activate  # On Windows, use `.venv\Scripts\activate`
 
 # Install dependencies
 pip install -e .
+
+# Install Streamlit dependencies (optional)
+pip install -e ".[streamlit]"
 ```
 
 ## Environment Setup
@@ -142,6 +150,23 @@ CACHE_DIR=.cache
    - Add the key to your `.env` file
    - Your API key will allow access to various LLM models, including the default `deepseek/deepseek-chat:free` model
 
+### OpenRouter API Integration Details
+
+The FASTER framework uses OpenRouter to access various LLM models for domain knowledge extraction. The integration provides:
+
+- Configurable model selection via the `model_name` parameter in `PipelineConfig`
+- Support for various LLM parameters like temperature and max_tokens
+- Built-in error handling and retries for API failures
+- Automatic masking of API keys in logs for security
+- Request tracking with unique IDs for each LLM interaction
+- Response validation to ensure well-formatted outputs
+
+The API key can be provided in several ways:
+1. Through the `.env` file (recommended)
+2. As an environment variable
+3. Directly to the Pipeline constructor via the `api_key` parameter
+4. In the Streamlit interface for the web application
+
 ## Project Structure
 
 ```
@@ -157,6 +182,7 @@ FASTER/
 │       ├── __init__.py
 │       ├── logging.py
 │       └── validation.py
+├── app.py                    # Streamlit web application
 ├── tests/                    # Test directory
 │   ├── conftest.py          # Test configuration and shared fixtures
 │   ├── test_domain_knowledge.py  # Domain knowledge extractor tests
@@ -170,15 +196,18 @@ FASTER/
 │   ├── raw/                 # Raw data
 │   └── processed/           # Processed data
 ├── examples/                 # Example notebooks and scripts
-│   └── quickstart.ipynb     # Quickstart notebook
+│   └── quickstart.ipynb     # Quickstart notebook (placeholder - see Quick Start section for code example)
 ├── .env                     # Environment variables
 ├── .gitignore              # Git ignore rules
 ├── pyproject.toml          # Project configuration
 ├── requirements.lock       # Locked dependencies
+├── README-streamlit.md     # Streamlit application documentation
 └── README.md              # This file
 ```
 
 ## Quick Start
+
+The code example below demonstrates the basic usage of FASTER. For more comprehensive examples and interactive usage, please refer to the Streamlit application (`app.py`).
 
 ```python
 from faster import Pipeline
@@ -234,6 +263,8 @@ for feature, metadata in feature_metadata.items():
         print(f"  - Transformation: {metadata['transformation'].get('transformation_type', '')}")
         print(f"  - Performance gain: {metadata['transformation'].get('performance_gain', 'N/A')}")
 ```
+
+This example demonstrates the basic workflow of using FASTER. For more detailed examples and interactive usage, use the Streamlit application.
 
 ## Feature Generation Types
 
@@ -365,12 +396,26 @@ pytest --cov=faster
 ```
 
 The test suite includes both unit tests for individual components and integration tests that verify the end-to-end pipeline with real datasets:
-- **Iris Classification**: Tests classification performance on the Iris flower dataset
-- **Titanic Classification**: Tests binary classification on the Titanic survival dataset 
-- **Auto MPG Regression**: Tests regression performance on the Auto MPG dataset
-- **Horsepower-MPG Regression**: Tests regression on the Horsepower vs. MPG relationship
+- **Iris Classification**: Tests classification performance on the Iris flower dataset (`test_iris_integration.py`)
+- **Titanic Classification**: Tests binary classification on the Titanic survival dataset (`test_titanic_integration.py`)
+- **Auto MPG Regression**: Tests regression performance on the Auto MPG dataset (`test_auto_mpg_integration.py`)
+- **Horsepower-MPG Regression**: Tests regression on the Horsepower vs. MPG relationship (`test_horsepower_mpg_integration.py`)
 
 These integration tests ensure that our feature engineering actually improves model performance in typical scenarios. Tests run both with mocked LLM responses (for fast, deterministic testing) and with live API calls (for complete end-to-end validation).
+
+### Testing OpenRouter API
+
+The repository includes a simple test script `test_openrouter.py` that can be used to verify your OpenRouter API key is working correctly:
+
+```bash
+# Set your API key in the environment
+export OPENROUTER_API_KEY="your-api-key-here"
+
+# Run the test script
+python test_openrouter.py
+```
+
+This will attempt a simple completion request to verify API connectivity.
 
 Tests have been updated to accommodate recent improvements in the framework, particularly around:
 
@@ -448,3 +493,21 @@ MIT License - see LICENSE file for details
 - OpenRouter for LLM API access
 - The scikit-learn community for statistical tools
 - The Python data science community
+
+## Interactive Web Application
+
+FASTER includes an interactive Streamlit web application that allows you to:
+
+1. Select from predefined datasets (Iris, Auto MPG, Titanic, Horsepower-MPG)
+2. Upload your own datasets
+3. Configure and run the FASTER pipeline
+4. Compare performance metrics between baseline and FASTER models
+5. Visualize feature importance and transformations
+
+To run the web application:
+
+```bash
+streamlit run app.py
+```
+
+For detailed information about the Streamlit application, see the [README-streamlit.md](README-streamlit.md) file.
