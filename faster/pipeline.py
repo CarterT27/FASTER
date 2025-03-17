@@ -40,6 +40,7 @@ class PipelineConfig(BaseModel):
     
     # Feature selection settings
     selection_criteria: SelectionCriteria = SelectionCriteria()
+    keep_all_features: bool = False
     
     # Output settings
     output_dir: Optional[str] = None
@@ -85,8 +86,12 @@ class Pipeline:
             correction_method=self.config.correction_method,
         )
         
+        # Create selection criteria with keep_all_features value from config
+        selection_criteria = self.config.selection_criteria
+        selection_criteria.keep_all_features = self.config.keep_all_features
+        
         self.feature_selector = FeatureSelector(
-            criteria=self.config.selection_criteria,
+            criteria=selection_criteria,
         )
         
         # Setup logging
@@ -101,111 +106,128 @@ class Pipeline:
         categorical_columns: Optional[List[str]] = None,
         domain_context: Optional[str] = None,
         is_classification: bool = True,
+        keep_all_features: bool = False,
     ) -> PipelineResult:
         """Run the full FASTER pipeline.
         
         Args:
             data: Input DataFrame
-            target_column: Name of target variable
-            problem_description: Description of the problem to solve
-            categorical_columns: List of categorical column names
-            domain_context: Optional additional domain context
+            target_column: Column name of the target variable
+            problem_description: Description of the problem
+            categorical_columns: Columns to treat as categorical
+            domain_context: Additional domain context
             is_classification: Whether this is a classification task
+            keep_all_features: Whether to keep all features without applying selection filters
             
         Returns:
-            Results of the pipeline including transformed data and metadata
+            PipelineResult with transformed data and metadata
         """
-        # Validate inputs
-        if data is None:
-            raise ValueError("Data cannot be None")
-            
-        if not target_column:
-            raise ValueError("Target column cannot be empty")
-            
-        if not problem_description:
-            raise ValueError("Problem description cannot be empty")
-            
-        # Further validate the dataframe
-        validate_dataframe(data, target_column, categorical_columns=categorical_columns)
+        # Validate input data
+        validate_dataframe(data, target_column)
         
-        start_time = time.time()
+        # Store original state to allow fallback
+        original_data = data.copy()
+        
+        # Setup logging and execution tracking
         run_id = str(uuid.uuid4())
-        logger.info("Starting FASTER pipeline")
-        
         execution_log = {
             "run_id": run_id,
-            "start_time": datetime.datetime.now().isoformat(),
-            "config": self.config.dict() if hasattr(self.config, "dict") else vars(self.config),
-            "steps": {}
+            "timestamp": datetime.datetime.now().isoformat(),
+            "input_shape": data.shape,
+            "target_column": target_column,
+            "is_classification": is_classification,
+            "steps": {},
         }
         
         try:
             # 1. Extract domain knowledge
-            logger.info("Extracting domain knowledge")
             step_start = time.time()
             
-            if domain_context is None:
-                domain_context = ""
+            # Temporarily store the current keep_all_features value
+            original_keep_all_features = self.feature_selector.criteria.keep_all_features
             
-            # Create dataset summary for LLM context
-            dataset_summary = self._create_dataset_summary(data, target_column, categorical_columns)
+            # Update the keep_all_features value based on the parameter
+            self.feature_selector.criteria.keep_all_features = keep_all_features
             
-            # Extract domain insights
-            domain_insights = self.domain_extractor.extract_knowledge(
-                data=data,
-                target_column=target_column,
-                problem_description=problem_description,
-                request_id=run_id
-            )
-            
-            execution_log["steps"]["domain_knowledge"] = {
-                "duration": time.time() - step_start,
-                "num_insights": len(domain_insights),
-            }
-            
-            # 2. Generate features based on domain knowledge
-            logger.info("Generating features")
+            try:
+                domain_insights = self.domain_extractor.extract_domain_knowledge(
+                    problem_description=problem_description,
+                    data_sample=data.head(5),
+                    column_names=list(data.columns),
+                    categorical_columns=categorical_columns,
+                    domain_context=domain_context,
+                )
+                
+                execution_log["steps"]["domain_knowledge"] = {
+                    "duration": time.time() - step_start,
+                    "insights_extracted": len(domain_insights),
+                }
+                
+            except Exception as e:
+                logger.error(f"Error in domain knowledge extraction: {str(e)}")
+                logger.warning("Proceeding without domain knowledge")
+                domain_insights = []
+                
+                execution_log["steps"]["domain_knowledge"] = {
+                    "duration": time.time() - step_start,
+                    "status": "error",
+                    "error": str(e),
+                }
+                
+            # 2. Generate features
             step_start = time.time()
+            try:
+                transformed_data = self.feature_generator.generate_features(
+                    data=data,
+                    target_column=target_column,
+                    categorical_columns=categorical_columns,
+                    domain_insights=domain_insights,
+                    max_interaction_degree=self.config.max_interaction_degree,
+                    text_feature_method=self.config.text_feature_method,
+                )
+                
+                execution_log["steps"]["feature_generation"] = {
+                    "duration": time.time() - step_start,
+                    "features_generated": transformed_data.shape[1] - data.shape[1],
+                }
+                
+            except Exception as e:
+                logger.error(f"Error in feature generation: {str(e)}")
+                logger.warning("Using original features as fallback")
+                transformed_data = data.copy()
+                
+                execution_log["steps"]["feature_generation"] = {
+                    "duration": time.time() - step_start,
+                    "status": "error",
+                    "error": str(e),
+                }
             
-            # Keep a copy of original data for performance comparison
-            original_data = data.copy()
-            
-            transformed_data = self.feature_generator.generate_features(
-                data=data,
-                domain_insights=domain_insights,
-                target_column=target_column,
-                is_classification=is_classification,
-            )
-            
-            execution_log["steps"]["feature_generation"] = {
-                "duration": time.time() - step_start,
-                "original_features": len(data.columns) - 1,  # exclude target
-                "generated_features": len(transformed_data.columns) - len(data.columns),
-                "total_features": len(transformed_data.columns) - 1,  # exclude target
-            }
-            
-            # 3. Evaluate features statistically
-            logger.info("Evaluating features")
+            # 3. Evaluate feature statistics
             step_start = time.time()
-            
             try:
                 feature_stats = self.statistical_evaluator.evaluate_features(
                     data=transformed_data,
                     target_column=target_column,
                     categorical_columns=categorical_columns,
                 )
+                
+                execution_log["steps"]["statistical_evaluation"] = {
+                    "duration": time.time() - step_start,
+                    "features_evaluated": len(feature_stats),
+                }
+                
             except Exception as e:
                 logger.error(f"Error in statistical evaluation: {str(e)}")
-                # Create fallback feature stats
-                feature_stats = self._create_fallback_feature_stats(transformed_data, target_column)
+                logger.warning("Proceeding with limited statistical information")
+                feature_stats = []
+                
+                execution_log["steps"]["statistical_evaluation"] = {
+                    "duration": time.time() - step_start,
+                    "status": "error",
+                    "error": str(e),
+                }
             
-            execution_log["steps"]["statistical_evaluation"] = {
-                "duration": time.time() - step_start,
-                "num_stats": len(feature_stats),
-            }
-            
-            # 4. Select optimal feature subset
-            logger.info("Selecting features")
+            # 4. Select features
             step_start = time.time()
             
             try:
@@ -224,6 +246,7 @@ class Pipeline:
                     "duration": time.time() - step_start,
                     "selected_features": len(selection_result.selected_features),
                     "removed_features": len(transformed_data.columns) - len(selected_columns),
+                    "keep_all_features": keep_all_features
                 }
                 
                 # Gather feature metadata
@@ -252,27 +275,80 @@ class Pipeline:
                     "selected_features": len(all_features),
                     "removed_features": 0,
                     "status": "fallback",
+                    "keep_all_features": keep_all_features
                 }
             
             # 5. Calculate performance metrics
             step_start = time.time()
+            
             try:
-                # Calculate performance with transformed features
-                transformed_metrics = self._calculate_performance_metrics(
-                    data=final_data,
-                    target_column=target_column,
-                    is_classification=is_classification,
-                )
+                from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+                from sklearn.model_selection import cross_val_score
+                from sklearn.metrics import make_scorer, r2_score, accuracy_score, f1_score, roc_auc_score
+                
+                if is_classification:
+                    model = RandomForestClassifier(n_estimators=100, random_state=42)
+                    scorer = make_scorer(accuracy_score)
+                    multi_class = len(np.unique(data[target_column])) > 2
+                    
+                    if multi_class:
+                        auc_scorer = make_scorer(f1_score, average='weighted')
+                    else:
+                        auc_scorer = make_scorer(roc_auc_score, needs_proba=True)
+                else:
+                    model = RandomForestRegressor(n_estimators=100, random_state=42)
+                    scorer = make_scorer(r2_score)
+                    auc_scorer = None
+                
+                # Calculate performance for transformed features
+                X = final_data.drop(columns=[target_column])
+                y = final_data[target_column]
+                
+                cv_scores = cross_val_score(model, X, y, cv=5, scoring=scorer)
+                performance_metrics = {
+                    "mean_score": float(np.mean(cv_scores)),
+                    "std_score": float(np.std(cv_scores)),
+                }
+                
+                if auc_scorer and is_classification and not multi_class:
+                    auc_scores = cross_val_score(model, X, y, cv=5, scoring=auc_scorer)
+                    performance_metrics["mean_auc"] = float(np.mean(auc_scores))
                 
                 # Calculate baseline performance with original features
-                baseline_metrics = self._calculate_performance_metrics(
-                    data=original_data,
-                    target_column=target_column,
-                    is_classification=is_classification,
-                )
+                use_transformed_features = True
                 
-                # Compare performance metrics to determine if we should use transformed features
-                use_transformed_features = self._compare_metrics(transformed_metrics, baseline_metrics, is_classification)
+                # Only compare if we have actually transformed features
+                if transformed_data.shape[1] > data.shape[1]:
+                    try:
+                        # Get baseline features (no target)
+                        X_baseline = original_data.drop(columns=[target_column])
+                        y_baseline = original_data[target_column]
+                        
+                        baseline_scores = cross_val_score(model, X_baseline, y_baseline, cv=5, scoring=scorer)
+                        baseline_metrics = {
+                            "mean_score": float(np.mean(baseline_scores)),
+                            "std_score": float(np.std(baseline_scores)),
+                        }
+                        
+                        if auc_scorer and is_classification and not multi_class:
+                            baseline_auc = cross_val_score(model, X_baseline, y_baseline, cv=5, scoring=auc_scorer)
+                            baseline_metrics["mean_auc"] = float(np.mean(baseline_auc))
+                        
+                        # Compare performance
+                        performance_diff = performance_metrics["mean_score"] - baseline_metrics["mean_score"]
+                        use_transformed_features = performance_diff >= -0.02  # Allow slight degradation
+                        
+                        execution_log["steps"]["performance_evaluation"] = {
+                            "duration": time.time() - step_start,
+                            "transformed_score": performance_metrics["mean_score"],
+                            "baseline_score": baseline_metrics["mean_score"],
+                            "performance_diff": performance_diff,
+                            "use_transformed": use_transformed_features,
+                        }
+                        
+                    except Exception as e:
+                        logger.error(f"Error in baseline comparison: {str(e)}")
+                        use_transformed_features = True  # Default to using transformed features
                 
                 # If baseline is better, fallback to it
                 if not use_transformed_features:
@@ -308,44 +384,34 @@ class Pipeline:
                         # Update execution log
                         execution_log["steps"]["feature_selection"]["status"] = "reverted_to_baseline"
                         execution_log["steps"]["feature_selection"]["selected_features"] = len(baseline_selection.selected_features)
-                        
                     except Exception as e:
-                        logger.error(f"Error reverting to baseline: {str(e)}")
-                        # Keep what we have but with baseline metrics
-                        performance_metrics = baseline_metrics
-                else:
-                    # Use the transformed features
-                    performance_metrics = transformed_metrics
-                
-                # Add comparison to execution log
-                execution_log["steps"]["performance_comparison"] = {
-                    "baseline_metrics": baseline_metrics,
-                    "transformed_metrics": transformed_metrics,
-                    "used_transformed_features": use_transformed_features,
-                }
+                        logger.error(f"Error in baseline selection: {str(e)}")
+                        # Continue with transformed features
                 
             except Exception as e:
-                logger.error(f"Error calculating performance metrics: {str(e)}")
+                logger.error(f"Error in performance evaluation: {str(e)}")
                 performance_metrics = {"error": str(e)}
+                
+                execution_log["steps"]["performance_evaluation"] = {
+                    "duration": time.time() - step_start,
+                    "status": "error",
+                    "error": str(e),
+                }
             
-            execution_log["steps"]["performance_evaluation"] = {
-                "duration": time.time() - step_start,
-                "metrics": performance_metrics,
-            }
+            # Save intermediate results if requested
+            if self.config.save_intermediate and self.config.output_dir:
+                output_dir = Path(self.config.output_dir)
+                output_dir.mkdir(exist_ok=True, parents=True)
+                
+                # Save execution log
+                with open(output_dir / f"execution_log_{run_id}.json", "w") as f:
+                    json.dump(execution_log, f, indent=2, default=str)
+                
+                # Save final dataset
+                final_data.to_csv(output_dir / f"final_data_{run_id}.csv", index=False)
             
-            # 6. Save results if output directory is specified
-            if self.config.output_dir:
-                self._save_results(PipelineResult(
-                    transformed_data=final_data,
-                    selected_features=selection_result.selected_features,
-                    feature_metadata=feature_metadata,
-                    performance_metrics=performance_metrics,
-                    execution_log=execution_log,
-                ))
-            
-            # Update execution log with total runtime
-            execution_log["total_duration"] = time.time() - start_time
-            execution_log["end_time"] = datetime.datetime.now().isoformat()
+            # Restore the original keep_all_features value
+            self.feature_selector.criteria.keep_all_features = original_keep_all_features
             
             return PipelineResult(
                 transformed_data=final_data,
@@ -356,8 +422,24 @@ class Pipeline:
             )
             
         except Exception as e:
-            logger.error(f"Pipeline error: {str(e)}")
-            # Return partial results if possible
+            logger.error(f"Error in pipeline execution: {str(e)}")
+            traceback.print_exc()
+            
+            # Create minimal result with error information
+            error_log = {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }
+            
+            # Combine with existing execution log
+            execution_log["error"] = error_log
+            
+            # Try to restore the original keep_all_features value in case of exception
+            try:
+                self.feature_selector.criteria.keep_all_features = original_keep_all_features
+            except:
+                pass
+            
             return PipelineResult(
                 transformed_data=data,
                 selected_features=[],

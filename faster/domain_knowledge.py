@@ -547,3 +547,41 @@ Focus on the most important features first and provide at least 4-5 insights.
         except Exception as e:
             logger.error(f"Error creating OpenAI client: {str(e)}")
             raise 
+
+    def extract_domain_knowledge(
+        self,
+        problem_description: str,
+        data_sample: pd.DataFrame,
+        column_names: List[str],
+        categorical_columns: Optional[List[str]] = None,
+        domain_context: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> List[DomainInsight]:
+        """Extract domain knowledge from LLM.
+        
+        Args:
+            problem_description: Description of the problem
+            data_sample: Sample of the dataset
+            column_names: List of column names
+            categorical_columns: Columns to treat as categorical
+            domain_context: Additional domain context
+            request_id: Unique ID for the request
+            
+        Returns:
+            List of domain insights
+        """
+        # Identify target column (assume last column if not specified)
+        target_column = column_names[-1] if column_names else None
+        
+        # Add domain context to problem description if provided
+        enhanced_problem_description = problem_description
+        if domain_context:
+            enhanced_problem_description = f"{problem_description}\n\nAdditional domain context: {domain_context}"
+        
+        # Call the existing extract_knowledge method
+        return self.extract_knowledge(
+            data=data_sample,
+            target_column=target_column,
+            problem_description=enhanced_problem_description,
+            request_id=request_id
+        ) 

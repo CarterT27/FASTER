@@ -22,15 +22,16 @@ logger = get_logger(__name__)
 class SelectionCriteria:
     """Criteria for feature selection."""
     
-    p_value_threshold: float = 0.1  # Increased from 0.05 to be less strict
-    min_effect_size: float = 0.05  # Decreased from 0.1 to be less strict
-    max_correlation: float = 0.9  # Increased from 0.8 to allow more correlated features
-    min_mutual_info: float = 0.005  # Decreased from 0.01 to be less strict
+    p_value_threshold: float = 0.2  # Increased from 0.1 to be much less strict
+    min_effect_size: float = 0.01  # Decreased from 0.05 to be less strict
+    max_correlation: float = 0.95  # Increased from 0.9 to allow more correlated features
+    min_mutual_info: float = 0.001  # Decreased from 0.005 to be less strict
     max_features: Optional[int] = None
-    min_importance_score: float = 0.01  # Decreased from 0.02 to be less strict
-    vif_threshold: float = 15.0  # Increased from 10.0 to be less strict
+    min_importance_score: float = 0.001  # Decreased from 0.01 to be much less strict
+    vif_threshold: float = 20.0  # Increased from 15.0 to be less strict
     cv_folds: int = 5  # Number of cross-validation folds
-    stability_threshold: float = 0.6  # Decreased from 0.7 to be less strict
+    stability_threshold: float = 0.5  # Decreased from 0.6 to be less strict
+    keep_all_features: bool = False  # Option to bypass feature dropping functionality
 
 @dataclass
 class SelectionResult:
@@ -88,6 +89,31 @@ class FeatureSelector:
                     selection_scores={},
                     removed_features={},
                     statistics={},
+                )
+            
+            # If keep_all_features is True, skip the feature dropping process
+            if self.criteria.keep_all_features:
+                logger.info("keep_all_features is enabled, retaining all features")
+                importance_scores = {}
+                
+                # Calculate importance scores for all features
+                if len(candidates) > 0:
+                    try:
+                        _, importance_scores = self._ml_based_selection_cv(
+                            data[list(candidates)],
+                            data[target_column],
+                            is_classification,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate importance scores: {e}")
+                        # Assign equal scores if calculation fails
+                        importance_scores = {feature: 1.0 for feature in candidates}
+                
+                return SelectionResult(
+                    selected_features=list(candidates),
+                    selection_scores=importance_scores,
+                    removed_features={},
+                    statistics={stat.feature_name: stat for stat in feature_stats},
                 )
                 
             removed = {}

@@ -140,7 +140,7 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
             regressor, X, y,
             cv=5,
             scoring=scoring,
-            return_train_score=True  # Changed to True to get train scores
+            return_train_score=True
         )
     
     # Calculate mean scores (negate the error metrics to get positive values)
@@ -250,6 +250,7 @@ def test_auto_mpg_integration(use_mock):
         output_dir=None,
         save_intermediate=False,
         categorical_encoding="dummy",
+        keep_all_features=True  # Keep all features without dropping any
     )
 
     if use_mock:
@@ -264,7 +265,8 @@ def test_auto_mpg_integration(use_mock):
                 data=data,
                 target_column='mpg',
                 problem_description="Regression problem predicting miles per gallon (MPG) of automobiles",
-                is_classification=False
+                is_classification=False,
+                keep_all_features=True  # Keep all features without dropping any
             )
             
             pipeline_with_domain = Pipeline(config)
@@ -292,7 +294,8 @@ def test_auto_mpg_integration(use_mock):
                 - Different regions (origins) had different emission standards and design philosophies
                 - The dataset contains cars from the 1970s and early 1980s during fuel crises
                 """,
-                is_classification=False
+                is_classification=False,
+                keep_all_features=True  # Keep all features without dropping any
             )
     else:
         # Create domain knowledge extractor with OpenRouter configuration
@@ -309,7 +312,8 @@ def test_auto_mpg_integration(use_mock):
             data=data,
             target_column='mpg',
             problem_description="Regression problem predicting miles per gallon (MPG) of automobiles",
-            is_classification=False
+            is_classification=False,
+            keep_all_features=True  # Keep all features without dropping any
         )
         
         pipeline_with_domain = Pipeline(config)
@@ -338,7 +342,8 @@ def test_auto_mpg_integration(use_mock):
             - Different regions (origins) had different emission standards and design philosophies
             - The dataset contains cars from the 1970s and early 1980s during fuel crises
             """,
-            is_classification=False
+            is_classification=False,
+            keep_all_features=True  # Keep all features without dropping any
         )
     
     # Get transformed features from the pipeline results
@@ -358,11 +363,11 @@ def test_auto_mpg_integration(use_mock):
     print("\nNo Domain Features Shape:", no_domain_features.shape)
     print("With Domain Features Shape:", with_domain_features.shape)
     print("\nBaseline X Columns:")
-    print(X.columns.tolist())
+    print(sorted(X.columns.tolist()))
     print("\nFASTER (No Domain Knowledge) X Columns:")
-    print(no_domain_features.columns.tolist())
+    print(sorted(no_domain_features.columns.tolist()))
     print("\nFASTER (With Domain Knowledge) X Columns:")
-    print(with_domain_features.columns.tolist())
+    print(sorted(with_domain_features.columns.tolist()))
     
     # Evaluate FASTER-enhanced models
     faster_no_domain_scores = evaluate_model(

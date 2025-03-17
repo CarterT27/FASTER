@@ -221,7 +221,7 @@ def test_titanic_integration(use_mock):
         selection_criteria=SelectionCriteria(),
         output_dir=None,
         save_intermediate=False,
-        categorical_encoding="dummy",
+        keep_all_features=True  # Keep all features without dropping any
     )
 
     if use_mock:
@@ -236,7 +236,8 @@ def test_titanic_integration(use_mock):
                 data=data,
                 target_column='Survived',
                 problem_description="Binary classification problem predicting survival",
-                is_classification=True
+                is_classification=True,
+                keep_all_features=True  # Keep all features without dropping any
             )
             
             pipeline_with_domain = Pipeline(config)
@@ -261,7 +262,8 @@ def test_titanic_integration(use_mock):
                 - Ticket fare could indicate wealth and access to better areas of the ship
                 - Port of embarkation could indicate passenger's social status
                 """,
-                is_classification=True
+                is_classification=True,
+                keep_all_features=True  # Keep all features without dropping any
             )
     else:
         # Create domain knowledge extractor with OpenRouter configuration
@@ -278,7 +280,8 @@ def test_titanic_integration(use_mock):
             data=data,
             target_column='Survived',
             problem_description="Binary classification problem predicting survival",
-            is_classification=True
+            is_classification=True,
+            keep_all_features=True  # Keep all features without dropping any
         )
         
         pipeline_with_domain = Pipeline(config)
@@ -304,7 +307,8 @@ def test_titanic_integration(use_mock):
             - Ticket fare could indicate wealth and access to better areas of the ship
             - Port of embarkation could indicate passenger's social status
             """,
-            is_classification=True
+            is_classification=True,
+            keep_all_features=True  # Keep all features without dropping any
         )
     
     # Get transformed features from the pipeline results
@@ -324,15 +328,11 @@ def test_titanic_integration(use_mock):
     print("\nNo Domain Features Shape:", no_domain_features.shape)
     print("With Domain Features Shape:", with_domain_features.shape)
     print("\nBaseline X Columns:")
-    print(X.columns.tolist())
+    print(sorted(X.columns.tolist()))
     print("\nFASTER (No Domain Knowledge) X Columns:")
-    print(no_domain_features.columns.tolist())
+    print(sorted(no_domain_features.columns.tolist()))
     print("\nFASTER (With Domain Knowledge) X Columns:")
-    print(with_domain_features.columns.tolist())
-    print("\nFASTER (No Domain Knowledge) X Columns:")
-    print(no_domain_features.columns.tolist())
-    print("\nFASTER (With Domain Knowledge) X Columns:")
-    print(with_domain_features.columns.tolist())
+    print(sorted(with_domain_features.columns.tolist()))
     
     # Evaluate FASTER-enhanced models
     faster_no_domain_scores = evaluate_model(

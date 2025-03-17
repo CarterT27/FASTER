@@ -48,6 +48,9 @@ class FeatureGenerator:
         data: pd.DataFrame,
         domain_insights: List[DomainInsight],
         target_column: Optional[str] = None,
+        categorical_columns: Optional[List[str]] = None,
+        max_interaction_degree: int = 2,
+        text_feature_method: str = "tfidf",
         is_classification: bool = True,
     ) -> pd.DataFrame:
         """Generate new features based on domain insights.
@@ -56,6 +59,9 @@ class FeatureGenerator:
             data: Input DataFrame
             domain_insights: List of domain insights about features
             target_column: Optional name of target variable to exclude from transformations
+            categorical_columns: Columns to treat as categorical
+            max_interaction_degree: Maximum degree of interaction features
+            text_feature_method: Method to use for text feature generation
             is_classification: Whether this is a classification task
             
         Returns:
@@ -63,6 +69,17 @@ class FeatureGenerator:
         """
         logger.info("Starting feature generation process")
         result_df = data.copy()
+        
+        # If categorical_columns is not provided, try to infer
+        if categorical_columns is None:
+            categorical_columns = []
+            for col in data.columns:
+                if col == target_column:
+                    continue
+                if pd.api.types.is_object_dtype(data[col]) or pd.api.types.is_categorical_dtype(data[col]) or (
+                    pd.api.types.is_numeric_dtype(data[col]) and data[col].nunique() < 10
+                ):
+                    categorical_columns.append(col)
         
         try:
             # Create feature importance dictionary from domain insights
@@ -106,6 +123,22 @@ class FeatureGenerator:
                 domain_insights,
                 recommended_transforms
             )
+            
+            # Handle categorical features
+            for col in categorical_columns:
+                if col in result_df.columns and col != target_column:
+                    # One-hot encode categorical features
+                    if "one_hot" in recommended_transforms.get(col, []):
+                        one_hot_df = self._apply_one_hot_encoding(result_df[col])
+                        for new_col in one_hot_df.columns:
+                            if new_col not in result_df.columns:
+                                result_df[new_col] = one_hot_df[new_col]
+                                self.transformations[new_col] = TransformationMetadata(
+                                    original_features=[col],
+                                    transformation_type="one_hot",
+                                    parameters={},
+                                    rationale="Categorical feature encoding",
+                                )
             
             # Generate text features if text columns present
             result_df = self._generate_text_features(result_df, domain_insights)
