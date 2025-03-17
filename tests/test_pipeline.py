@@ -113,7 +113,7 @@ def test_pipeline_validation(pipeline_config):
         
         with pytest.raises(ValueError, match="Problem description cannot be empty"):
             pipeline.run(
-                data=pd.DataFrame({'a': [1, 2, 3]}),
+                data=pd.DataFrame({'a': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]}),
                 target_column="a",
                 problem_description="",
             ) 

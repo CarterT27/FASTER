@@ -123,6 +123,8 @@ class Pipeline:
             PipelineResult with transformed data and metadata
         """
         # Validate input data
+        if not problem_description:
+            raise ValueError("Problem description cannot be empty")
         validate_dataframe(data, target_column)
         
         # Store original state to allow fallback
