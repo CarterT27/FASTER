@@ -18,6 +18,7 @@ from sklearn.impute import SimpleImputer
 from faster.pipeline import Pipeline, PipelineConfig
 from faster.feature_selection import SelectionCriteria
 from faster.domain_knowledge import DomainKnowledgeExtractor
+from tests.conftest import colored_metric_output
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -394,18 +395,26 @@ def test_auto_mpg_integration(use_mock):
     print("\nFASTER (No Domain Knowledge):")
     print("  Train Metrics:")
     for metric, score in [(k, v) for k, v in faster_no_domain_scores.items() if k.startswith('train')]:
-        print(f"    {metric.replace('train_', '')}: {score:.4f}")
+        metric_name = metric.replace('train_', '')
+        baseline_score = baseline_scores[metric]
+        print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
     print("  Test Metrics:")
     for metric, score in [(k, v) for k, v in faster_no_domain_scores.items() if k.startswith('test')]:
-        print(f"    {metric.replace('test_', '')}: {score:.4f}")
+        metric_name = metric.replace('test_', '')
+        baseline_score = baseline_scores[metric]
+        print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
     
     print("\nFASTER (With Domain Knowledge):")
     print("  Train Metrics:")
     for metric, score in [(k, v) for k, v in faster_with_domain_scores.items() if k.startswith('train')]:
-        print(f"    {metric.replace('train_', '')}: {score:.4f}")
+        metric_name = metric.replace('train_', '')
+        baseline_score = baseline_scores[metric]
+        print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
     print("  Test Metrics:")
     for metric, score in [(k, v) for k, v in faster_with_domain_scores.items() if k.startswith('test')]:
-        print(f"    {metric.replace('test_', '')}: {score:.4f}")
+        metric_name = metric.replace('test_', '')
+        baseline_score = baseline_scores[metric]
+        print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
     
     # Print generated features
     print("\nGenerated Features:")

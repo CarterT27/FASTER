@@ -74,4 +74,44 @@ def sample_domain_context():
             'categorical': 'Customer segment',
             'text': 'Customer feedback'
         }
-    } 
+    }
+
+def colored_metric_output(metric_name: str, model_score: float, baseline_score: float) -> str:
+    """
+    Format metric output with color based on performance compared to baseline.
+    
+    Args:
+        metric_name: Name of the metric (e.g., 'r2', 'accuracy')
+        model_score: Score achieved by the model being evaluated
+        baseline_score: Score achieved by the baseline model
+        
+    Returns:
+        Formatted string with appropriate color (green for better, red for worse)
+    """
+    # Define ANSI color codes
+    GREEN = '\033[92m'  # Bright green
+    RED = '\033[91m'    # Bright red
+    RESET = '\033[0m'   # Reset to default
+    
+    # For error metrics (like RMSE, MAE), lower is better
+    error_metrics = ['rmse', 'mae', 'error', 'loss']
+    is_error_metric = any(err in metric_name.lower() for err in error_metrics)
+    
+    # Determine if the model outperformed the baseline
+    if is_error_metric:
+        is_better = model_score < baseline_score
+    else:
+        is_better = model_score > baseline_score
+    
+    # Format the difference with proper sign
+    diff = model_score - baseline_score
+    diff_str = f"{diff:.4f}"
+    if not is_error_metric:
+        diff_str = f"+{diff_str}" if diff > 0 else f"{diff_str}"
+    else:
+        diff_str = f"{diff_str}" if diff > 0 else f"{diff_str}"
+    
+    # Apply color based on whether it's better or worse
+    color = GREEN if is_better else RED
+    
+    return f"{metric_name}: {color}{model_score:.4f} ({diff_str}){RESET}" 
