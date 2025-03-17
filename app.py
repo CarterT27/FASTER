@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Tuple, Any, Optional, Union
 import logging
+import copy
 
 # Import FASTER components
 from faster.pipeline import Pipeline, PipelineConfig
@@ -127,9 +128,9 @@ def main():
                     keep_all_features=True
                 )
                 
-                # Set OpenRouter API key if provided
-                if api_key:
-                    os.environ["OPENROUTER_API_KEY"] = api_key
+                # Pass API key directly instead of setting environment variable
+                # if api_key:
+                #     os.environ["OPENROUTER_API_KEY"] = api_key
                 
                 # Run pipeline with and without domain knowledge
                 results = run_pipeline(
@@ -138,7 +139,8 @@ def main():
                     problem_description=problem_description,
                     is_classification=is_classification,
                     config=config,
-                    use_mock=use_mock
+                    use_mock=use_mock,
+                    api_key=api_key
                 )
                 
                 # Display results
@@ -280,7 +282,8 @@ def run_pipeline(
     problem_description: str,
     is_classification: bool,
     config: PipelineConfig,
-    use_mock: bool
+    use_mock: bool,
+    api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Run the FASTER pipeline and return results.
@@ -292,6 +295,7 @@ def run_pipeline(
         is_classification: Whether it's a classification problem
         config: Pipeline configuration
         use_mock: Whether to use mock LLM responses
+        api_key: Optional OpenRouter API key to pass to LLM-based components
         
     Returns:
         Dictionary containing pipeline results and evaluation metrics
@@ -309,7 +313,11 @@ def run_pipeline(
     
     # Create FASTER pipeline
     pipeline_no_domain = Pipeline(config)
-    pipeline_with_domain = Pipeline(config)
+    
+    # For the pipeline that uses domain knowledge, pass the API key
+    # Create a config copy to include the API key
+    domain_config = copy.deepcopy(config)
+    pipeline_with_domain = Pipeline(domain_config, api_key=api_key)
     
     # Run pipeline without domain knowledge
     st.info("Running FASTER pipeline without domain knowledge...")

@@ -62,11 +62,13 @@ class Pipeline:
     def __init__(
         self,
         config: Optional[Union[PipelineConfig, Dict]] = None,
+        api_key: Optional[str] = None,
     ):
         """Initialize the pipeline.
         
         Args:
             config: Pipeline configuration
+            api_key: Optional OpenRouter API key to pass to the domain knowledge extractor
         """
         self.config = (
             config if isinstance(config, PipelineConfig)
@@ -77,6 +79,7 @@ class Pipeline:
         self.domain_extractor = DomainKnowledgeExtractor(
             model_name=self.config.model_name,
             temperature=self.config.temperature,
+            api_key=api_key,
         )
         
         self.feature_generator = FeatureGenerator()
