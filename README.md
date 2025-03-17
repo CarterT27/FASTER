@@ -77,8 +77,11 @@ The FASTER framework has undergone several key improvements to address performan
 
 - **Improved Test Coverage**: Enhanced test suite with more comprehensive coverage
 - **Integration Tests**: Additional tests for end-to-end pipeline functionality
+  - **Multiple Dataset Testing**: Tests now include Iris, Titanic, Auto MPG, and Horsepower-MPG datasets
+  - **Mock and Live Testing**: Integration tests support both mock LLM responses and live OpenRouter API calls
 - **Performance Benchmarks**: Tests now verify actual performance improvements
 - **Model Validation**: Validation of model improvements across different datasets
+- **Automatic Test Configuration**: Tests automatically detect and configure API keys when available
 
 These improvements have significantly enhanced the framework's ability to generate features that actually improve model performance, while reducing noise from unhelpful transformations.
 
@@ -122,7 +125,13 @@ cp .env.example .env
 
 2. Edit `.env` with your configuration:
 ```env
+# OpenRouter API Configuration
 OPENROUTER_API_KEY=your_api_key_here
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+YOUR_SITE_URL=https://github.com/cartert27/FASTER
+YOUR_SITE_NAME=FASTER Feature Engineering
+
+# Optional settings
 LOG_LEVEL=INFO
 CACHE_DIR=.cache
 ```
@@ -141,7 +150,7 @@ FASTER/
 │   ├── __init__.py           # Package initialization
 │   ├── domain_knowledge.py   # Domain knowledge extraction
 │   ├── feature_generation.py # Feature generation and transformation
-│   ├── statistical_eval.py   # Statistical testing
+│   ├── statistical_evaluation.py  # Statistical testing and evaluation
 │   ├── feature_selection.py  # Feature selection
 │   ├── pipeline.py          # Main pipeline orchestration
 │   └── utils/               # Utility functions
@@ -149,14 +158,19 @@ FASTER/
 │       ├── logging.py
 │       └── validation.py
 ├── tests/                    # Test directory
-│   ├── __init__.py
-│   ├── conftest.py
-│   └── test_*.py            # Test modules
+│   ├── conftest.py          # Test configuration and shared fixtures
+│   ├── test_domain_knowledge.py  # Domain knowledge extractor tests
+│   ├── test_feature_generation.py  # Feature generation tests
+│   ├── test_pipeline.py     # Pipeline tests
+│   ├── test_iris_integration.py  # Integration test with Iris dataset
+│   ├── test_titanic_integration.py  # Integration test with Titanic dataset
+│   ├── test_auto_mpg_integration.py  # Integration test with Auto MPG dataset
+│   └── test_horsepower_mpg_integration.py  # Integration test with Horsepower-MPG dataset
 ├── data/                     # Data directory
 │   ├── raw/                 # Raw data
 │   └── processed/           # Processed data
 ├── examples/                 # Example notebooks and scripts
-├── docs/                    # Documentation
+│   └── quickstart.ipynb     # Quickstart notebook
 ├── .env                     # Environment variables
 ├── .gitignore              # Git ignore rules
 ├── pyproject.toml          # Project configuration
@@ -350,7 +364,13 @@ pytest tests/test_feature_generation.py
 pytest --cov=faster
 ```
 
-The test suite includes both unit tests for individual components and integration tests that verify the end-to-end pipeline with real datasets (Titanic and Iris). These integration tests ensure that our feature engineering actually improves model performance in typical scenarios.
+The test suite includes both unit tests for individual components and integration tests that verify the end-to-end pipeline with real datasets:
+- **Iris Classification**: Tests classification performance on the Iris flower dataset
+- **Titanic Classification**: Tests binary classification on the Titanic survival dataset 
+- **Auto MPG Regression**: Tests regression performance on the Auto MPG dataset
+- **Horsepower-MPG Regression**: Tests regression on the Horsepower vs. MPG relationship
+
+These integration tests ensure that our feature engineering actually improves model performance in typical scenarios. Tests run both with mocked LLM responses (for fast, deterministic testing) and with live API calls (for complete end-to-end validation).
 
 Tests have been updated to accommodate recent improvements in the framework, particularly around:
 
@@ -392,6 +412,7 @@ FASTER provides custom exceptions for different error categories:
   - Includes specialized handling for OpenRouter API errors
   - Retry logic for transient API issues
   - Rate limiting detection and backoff
+  - Automatic fallback to alternative models when possible
 - `FasterTransformError`: Feature transformation errors
 - `FasterStatisticalError`: Statistical evaluation errors
 
