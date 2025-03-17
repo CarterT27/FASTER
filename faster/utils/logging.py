@@ -22,18 +22,14 @@ def setup_logging(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
     
-    # Create formatter
     formatter = logging.Formatter(format_string)
     
-    # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     
-    # Remove existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Add console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
