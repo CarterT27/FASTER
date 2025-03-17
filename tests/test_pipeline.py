@@ -52,7 +52,7 @@ def test_pipeline_initialization(pipeline_config):
 @patch('faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry')
 def test_pipeline_run(mock_query, sample_data, pipeline_config):
     """Test pipeline execution."""
-    # Mock LLM response
+
     mock_query.return_value = [
         {
             "feature_name": "feature_0",
@@ -62,8 +62,7 @@ def test_pipeline_run(mock_query, sample_data, pipeline_config):
             "rationale": "Test feature"
         }
     ]
-    
-    # Create mock statistical evaluator
+
     with patch('faster.statistical_evaluation.StatisticalEvaluator.evaluate_features') as mock_stats:
         mock_stats.return_value = [
             FeatureStatistics(

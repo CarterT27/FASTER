@@ -19,11 +19,9 @@ from faster.feature_selection import SelectionCriteria
 from faster.domain_knowledge import DomainKnowledgeExtractor
 from tests.conftest import colored_metric_output
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Mock LLM response for Titanic dataset
 MOCK_LLM_RESPONSE = [
     {
         "feature_name": "Sex",
@@ -64,32 +62,26 @@ MOCK_LLM_RESPONSE = [
 
 def load_and_preprocess_titanic() -> Tuple[pd.DataFrame, pd.Series]:
     """Load and preprocess the Titanic dataset."""
-    # Load Titanic dataset
+
     titanic = pd.read_csv('https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv')
-    
-    # Basic feature selection
+
     features = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked']
     X = titanic[features].copy()
     y = titanic['Survived']
-    
-    # Handle missing values
+
     numeric_features = ['Age', 'Fare']
     categorical_features = ['Sex', 'Embarked']
-    
-    # Impute numeric features
+
     numeric_imputer = SimpleImputer(strategy='median')
     X[numeric_features] = numeric_imputer.fit_transform(X[numeric_features])
-    
-    # Impute categorical features
+
     categorical_imputer = SimpleImputer(strategy='most_frequent')
     X[categorical_features] = categorical_imputer.fit_transform(X[categorical_features])
-    
-    # Encode categorical features
+
     for feature in categorical_features:
         le = LabelEncoder()
         X[feature] = le.fit_transform(X[feature])
-    
-    # Scale numeric features
+
     scaler = StandardScaler()
     X[numeric_features] = scaler.fit_transform(X[numeric_features])
     
@@ -98,15 +90,13 @@ def load_and_preprocess_titanic() -> Tuple[pd.DataFrame, pd.Series]:
 def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
     """Evaluate model using cross-validation."""
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    
-    # Define scoring metrics
+
     scoring = {
         'accuracy': 'accuracy',
         'f1': 'f1',
         'roc_auc': 'roc_auc'
     }
-    
-    # Perform cross-validation
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         cv_results = cross_validate(
@@ -115,14 +105,13 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
             scoring=scoring,
             return_train_score=True
         )
-    
-    # Calculate mean scores
+
     return {
-        # Test scores
+
         'test_accuracy': cv_results['test_accuracy'].mean(),
         'test_f1': cv_results['test_f1'].mean(),
         'test_roc_auc': cv_results['test_roc_auc'].mean(),
-        # Train scores
+
         'train_accuracy': cv_results['train_accuracy'].mean(),
         'train_f1': cv_results['train_f1'].mean(),
         'train_roc_auc': cv_results['train_roc_auc'].mean()
@@ -135,22 +124,19 @@ def verify_openrouter_api_key() -> str:
     Returns:
         str: Validated API key or raises a pytest.skip exception
     """
-    # Check if API key exists in environment
+
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     
     if not api_key:
         pytest.skip("Skipping non-mock test: OPENROUTER_API_KEY environment variable not set")
-    
-    # Validate API key format
+
     if not api_key.startswith("sk-"):
         logger.warning("Warning: OpenRouter API key does not start with 'sk-'. Key may be invalid.")
-    
-    # Check for obvious placeholder values
+
     placeholder_terms = ["dummy", "test", "placeholder", "your_key", "example"]
     if any(term in api_key.lower() for term in placeholder_terms):
         pytest.skip(f"Skipping non-mock test: OPENROUTER_API_KEY appears to be a placeholder value")
-    
-    # Log (masked) key information for debugging
+
     masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
     logger.info(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
     
@@ -177,16 +163,14 @@ def configure_openai_client(api_key: str) -> openai.OpenAI:
 @pytest.mark.parametrize("use_mock", [True, False])
 def test_titanic_integration(use_mock):
     """Integration test comparing baseline and FASTER-enhanced models on Titanic dataset."""
-    # Set up OpenRouter credentials for non-mock tests
+
     if not use_mock:
         try:
-            # Verify and get API key
+
             api_key = verify_openrouter_api_key()
-            
-            # Configure OpenAI client for OpenRouter
+
             client = configure_openai_client(api_key)
-            
-            # Test the client with a simple query to verify credentials work
+
             try:
                 response = client.chat.completions.create(
                     model="deepseek/deepseek-chat:free",
@@ -203,15 +187,12 @@ def test_titanic_integration(use_mock):
             logger.error(f"Error setting up OpenRouter credentials: {str(e)}")
             pytest.skip(f"Skipping non-mock test: {str(e)}")
 
-    # Load and preprocess data
     X, y = load_and_preprocess_titanic()
     data = X.copy()
     data['Survived'] = y
-    
-    # 1. Evaluate baseline model
+
     baseline_scores = evaluate_model(X, y)
-    
-    # Configure FASTER pipeline with OpenRouter
+
     config = PipelineConfig(
         model_name="deepseek/deepseek-chat:free",
         temperature=0.0,
@@ -226,12 +207,11 @@ def test_titanic_integration(use_mock):
     )
 
     if use_mock:
-        # Mock the LLM calls
+
         with patch('faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry') as mock_query:
-            # Set up mock responses
+
             mock_query.return_value = MOCK_LLM_RESPONSE
-            
-            # Run tests with mocked LLM
+
             pipeline_no_domain = Pipeline(config)
             result_no_domain = pipeline_no_domain.run(
                 data=data,
@@ -267,14 +247,13 @@ def test_titanic_integration(use_mock):
                 keep_all_features=True  # Keep all features without dropping any
             )
     else:
-        # Create domain knowledge extractor with OpenRouter configuration
+
         domain_extractor = DomainKnowledgeExtractor(
             model_name=config.model_name,
             temperature=config.temperature,
             api_key=api_key
         )
-        
-        # Create pipelines with configured domain extractor
+
         pipeline_no_domain = Pipeline(config)
         pipeline_no_domain.domain_extractor = domain_extractor
         result_no_domain = pipeline_no_domain.run(
@@ -311,21 +290,17 @@ def test_titanic_integration(use_mock):
             is_classification=True,
             keep_all_features=True  # Keep all features without dropping any
         )
-    
-    # Get transformed features from the pipeline results
+
     print("\nAvailable attributes in result_no_domain:", dir(result_no_domain))
-    
-    # Get the transformed data
+
     no_domain_features = result_no_domain.transformed_data
     with_domain_features = result_with_domain.transformed_data
-    
-    # Drop the target column if it exists in the transformed data
+
     if 'Survived' in no_domain_features.columns:
         no_domain_features = no_domain_features.drop('Survived', axis=1)
     if 'Survived' in with_domain_features.columns:
         with_domain_features = with_domain_features.drop('Survived', axis=1)
-    
-    # Print feature information for debugging
+
     print("\nNo Domain Features Shape:", no_domain_features.shape)
     print("With Domain Features Shape:", with_domain_features.shape)
     print("\nBaseline X Columns:")
@@ -334,8 +309,7 @@ def test_titanic_integration(use_mock):
     print(sorted(no_domain_features.columns.tolist()))
     print("\nFASTER (With Domain Knowledge) X Columns:")
     print(sorted(with_domain_features.columns.tolist()))
-    
-    # Evaluate FASTER-enhanced models
+
     faster_no_domain_scores = evaluate_model(
         no_domain_features,
         y
@@ -345,8 +319,7 @@ def test_titanic_integration(use_mock):
         with_domain_features,
         y
     )
-    
-    # Print results
+
     print(f"\nModel Performance Comparison ({'Mock' if use_mock else 'Real'} LLM):")
     
     print("\nBaseline Model:")
@@ -380,15 +353,13 @@ def test_titanic_integration(use_mock):
         metric_name = metric.replace('test_', '')
         baseline_score = baseline_scores[metric]
         print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
-    
-    # Print generated features
+
     print("\nGenerated Features:")
     print("\nNo Domain Knowledge:")
     print(result_no_domain.selected_features)
     print("\nWith Domain Knowledge:")
     print(result_with_domain.selected_features)
-    
-    # Assertions to ensure FASTER is working
+
     assert result_no_domain.selected_features is not None
     assert result_with_domain.selected_features is not None
     assert len(result_no_domain.selected_features) > 0

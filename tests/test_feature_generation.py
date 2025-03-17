@@ -87,17 +87,14 @@ def test_is_text_column():
 
 def test_fit_transform_scaler(feature_generator):
     """Test scaler fitting and transformation."""
-    # Create a simple series with known values
+
     series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
-    
-    # Use sklearn's StandardScaler for comparison
+
     sklearn_scaler = StandardScaler()
     expected = pd.Series(sklearn_scaler.fit_transform(series.values.reshape(-1, 1)).flatten())
-    
-    # Test our implementation
+
     transformed = feature_generator._fit_transform_scaler(series, 'test')
-    
-    # Compare with sklearn's output
+
     pd.testing.assert_series_equal(
         transformed,
         expected,
@@ -109,7 +106,7 @@ def test_fit_transform_scaler(feature_generator):
 
 def test_apply_basic_transformations(feature_generator, sample_data):
     """Test basic transformation application."""
-    # Create a list of top features to pass to the function
+
     top_features = ['numeric_normal', 'numeric_skewed']
     
     result = feature_generator._apply_basic_transformations(
@@ -118,14 +115,13 @@ def test_apply_basic_transformations(feature_generator, sample_data):
         'target',
         top_features
     )
-    
-    # Check transformations were applied
+
     assert 'scaled_numeric_normal' in result.columns
     assert 'log_numeric_skewed' in result.columns
 
 def test_generate_interaction_features(feature_generator):
     """Test interaction feature generation."""
-    # Create simple test data
+
     test_data = pd.DataFrame({
         'feature1': [1, 2, 3],
         'feature2': [4, 5, 6]
@@ -140,26 +136,22 @@ def test_generate_interaction_features(feature_generator):
             rationale="Test interaction"
         )
     ]
-    
-    # Generate interaction features
+
     result = feature_generator._generate_interaction_features(test_data.copy(), test_insights)
-    
-    # Check if interaction column was created
+
     interaction_col = 'multiply_feature1_feature2'
     assert interaction_col in result.columns
-    
-    # Verify interaction values
+
     expected_interaction = test_data['feature1'] * test_data['feature2']
     pd.testing.assert_series_equal(result[interaction_col], expected_interaction, check_names=False)
-    
-    # Check transformation metadata
+
     assert interaction_col in feature_generator.transformations
     assert feature_generator.transformations[interaction_col].transformation_type == 'multiply'
     assert set(feature_generator.transformations[interaction_col].original_features) == {'feature1', 'feature2'}
 
 def test_apply_domain_transformations(feature_generator, sample_data, sample_insights):
     """Test domain-specific transformation application."""
-    # Create recommended transforms dictionary
+
     recommended_transforms = {
         'numeric_normal': ['zscore', 'minmax'],
         'numeric_skewed': ['log'],
@@ -171,14 +163,13 @@ def test_apply_domain_transformations(feature_generator, sample_data, sample_ins
         sample_insights,
         recommended_transforms
     )
-    
-    # Check transformations were applied
+
     assert 'zscore_numeric_normal' in result.columns
     assert 'log_numeric_skewed' in result.columns
 
 def test_generate_text_features(feature_generator):
     """Test text feature generation."""
-    # Create test data with clear text features
+
     test_data = pd.DataFrame({
         'text_col': [
             'This is a long text about topic A',
@@ -189,15 +180,14 @@ def test_generate_text_features(feature_generator):
     })
     
     result = feature_generator._generate_text_features(test_data, [])
-    
-    # Check if TF-IDF features were created
+
     tfidf_cols = [col for col in result.columns if col.startswith('tfidf_text_col_')]
     assert len(tfidf_cols) > 0
     assert 'text_col' in feature_generator._text_vectorizers
 
 def test_generate_features_integration(feature_generator):
     """Test full feature generation pipeline."""
-    # Create test data with clear features for transformation
+
     test_data = pd.DataFrame({
         'numeric': [1.0, 2.0, 3.0, 4.0],
         'skewed': [1.0, 10.0, 100.0, 1000.0],
@@ -234,21 +224,18 @@ def test_generate_features_integration(feature_generator):
         'target'
     )
 
-    # Check basic transformations - update to match actual output column names
     assert 'zscore_numeric' in result.columns
     assert 'scaled_numeric' in result.columns
     assert 'log_skewed' in result.columns
 
-    # Check interaction features
     assert 'multiply_numeric_skewed' in result.columns
-    
-    # Check text features (if any were generated)
+
     text_features = [col for col in result.columns if col.startswith('tfidf_')]
     assert len(text_features) > 0
 
 def test_error_handling(feature_generator):
     """Test error handling in feature generation."""
-    # Create minimal test data
+
     test_data = pd.DataFrame({
         'existing_feature': [1, 2, 3],
         'target': [0, 1, 0]
@@ -263,15 +250,13 @@ def test_error_handling(feature_generator):
             rationale="This feature doesn't exist"
         )
     ]
-    
-    # Should not raise exception but log warning
+
     result = feature_generator.generate_features(
         test_data,
         invalid_insights,
         target_column='target'
     )
-    
-    # Should only have original columns plus any automatic transformations of existing numeric columns
+
     assert 'nonexistent_feature' not in result.columns
     assert 'another_nonexistent' not in result.columns
     assert 'log_nonexistent_feature' not in result.columns
@@ -289,11 +274,10 @@ def test_transformation_metadata(feature_generator, sample_data, sample_insights
 
 def test_scipy_transformations(feature_generator):
     """Test scipy-based transformations."""
-    # Create test data with clear patterns for transformations
+
     x = np.linspace(0, 10, 100)
     np.random.seed(42)  # Set seed for reproducibility
 
-    # Generate uniform values between 0.01 and 0.99
     uniform_values = np.random.uniform(0.01, 0.99, 100)
     print(f"\nUniform values range: [{uniform_values.min():.6f}, {uniform_values.max():.6f}]")
 
@@ -308,7 +292,6 @@ def test_scipy_transformations(feature_generator):
 
     print(f"Uniform column range: [{test_data['uniform'].min():.6f}, {test_data['uniform'].max():.6f}]")
 
-    # Verify test data is correctly set up
     assert (test_data['uniform'] > 0).all(), "Uniform values must be positive"
     assert (test_data['uniform'] < 1).all(), "Uniform values must be less than 1"
 
@@ -356,26 +339,21 @@ def test_scipy_transformations(feature_generator):
             rationale="Test Hilbert transform"
         ),
     ]
-    
-    # Create recommended transforms dictionary from insights
+
     recommended_transforms = {}
     for insight in test_insights:
         recommended_transforms[insight.feature_name] = insight.suggested_transformations
 
     result = feature_generator._apply_domain_transformations(test_data, test_insights, recommended_transforms)
-    
-    # Print out the actual columns for debugging
+
     print(f"\nActual columns in result: {result.columns.tolist()}")
-    
-    # Check transformations were applied - verify only the columns that actually exist
+
     if 'boxcox_positive' in result.columns:
         assert abs(stats.skew(result["boxcox_positive"])) < abs(stats.skew(test_data["positive"]))
     
     if 'yeojohnson_any_value' in result.columns:
         assert 'yeojohnson_any_value' in result.columns
 
-    # These tests were looking for transformations that are no longer applied
-    # in the updated implementation, so we'll skip them
-    # assert abs(result["detrend_trend"].mean()) < 0.1
-    # assert "savgol_noisy" in result.columns
-    # assert "hilbert_oscillating" in result.columns 
+
+
+

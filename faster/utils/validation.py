@@ -31,51 +31,41 @@ def validate_dataframe(
     """
     if data is None:
         raise ValueError("Data cannot be None")
-        
-    # Check if target column is empty
+
     if not target_column:
         raise ValueError("Target column cannot be empty")
-    
-    # Check if DataFrame is empty
+
     if data.empty:
         raise ValueError("DataFrame cannot be empty")
-    
-    # Check minimum number of rows
+
     if len(data) < min_rows:
         raise ValueError(
             f"Input DataFrame must have at least {min_rows} rows, got {len(data)}"
         )
-    
-    # Check if target column exists
+
     if target_column not in data.columns:
         raise ValueError(f"Target column '{target_column}' not found in DataFrame")
-    
-    # Check required columns
+
     if required_columns:
         missing_cols = set(required_columns) - set(data.columns)
         if missing_cols:
             raise ValueError(f"Required columns missing: {missing_cols}")
-    
-    # Check for duplicate column names
+
     if data.columns.duplicated().any():
         raise ValueError("DataFrame contains duplicate column names")
-    
-    # Check for all-null columns
+
     null_cols = data.columns[data.isnull().all()].tolist()
     if null_cols:
         raise ValueError(f"Found columns with all null values: {null_cols}")
-    
-    # Validate categorical columns if provided
+
     if categorical_columns:
         invalid_cols = [col for col in categorical_columns if col not in data.columns]
         if invalid_cols:
             raise ValueError(f"Categorical columns not found in DataFrame: {invalid_cols}")
-    
-    # Check for missing values in target
+
     if data[target_column].isnull().any():
         raise ValueError("Target column contains missing values")
-    
-    # Log warnings for potential issues
+
     _check_data_quality(data, target_column)
 
 def validate_feature_names(feature_names: List[str]) -> None:
@@ -89,13 +79,11 @@ def validate_feature_names(feature_names: List[str]) -> None:
     """
     if not feature_names:
         raise ValueError("Feature names list is empty")
-    
-    # Check for duplicate names
+
     duplicates = {name for name in feature_names if feature_names.count(name) > 1}
     if duplicates:
         raise ValueError(f"Duplicate feature names found: {duplicates}")
-    
-    # Check for invalid characters
+
     invalid_chars = set("!@#$%^&*()[]{};:,/<>?\\|`~")
     for name in feature_names:
         if any(char in invalid_chars for char in name):
@@ -139,7 +127,7 @@ def validate_numeric_value(
 
 def _check_data_quality(data: pd.DataFrame, target_column: str) -> None:
     """Check for potential data quality issues and log warnings."""
-    # Check for high cardinality in categorical columns
+
     for col in data.select_dtypes(include=["object"]).columns:
         unique_ratio = data[col].nunique() / len(data)
         if unique_ratio > 0.9:
@@ -147,8 +135,7 @@ def _check_data_quality(data: pd.DataFrame, target_column: str) -> None:
                 f"Column '{col}' has high cardinality "
                 f"({data[col].nunique()} unique values)"
             )
-    
-    # Check for highly skewed numerical columns
+
     for col in data.select_dtypes(include=np.number).columns:
         if col != target_column:
             skewness = data[col].skew()
@@ -157,8 +144,7 @@ def _check_data_quality(data: pd.DataFrame, target_column: str) -> None:
                     f"Column '{col}' is highly skewed "
                     f"(skewness = {skewness:.2f})"
                 )
-    
-    # Check for high percentage of missing values
+
     missing_ratios = data.isnull().mean()
     high_missing = missing_ratios[missing_ratios > 0.2]
     if not high_missing.empty:
@@ -166,8 +152,7 @@ def _check_data_quality(data: pd.DataFrame, target_column: str) -> None:
             logger.warning(
                 f"Column '{col}' has {ratio:.1%} missing values"
             )
-    
-    # Check for constant or near-constant columns
+
     for col in data.columns:
         if col != target_column:
             unique_ratio = data[col].nunique() / len(data)

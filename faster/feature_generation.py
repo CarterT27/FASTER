@@ -69,8 +69,7 @@ class FeatureGenerator:
         """
         logger.info("Starting feature generation process")
         result_df = data.copy()
-        
-        # If categorical_columns is not provided, try to infer
+
         if categorical_columns is None:
             categorical_columns = []
             for col in data.columns:
@@ -82,52 +81,45 @@ class FeatureGenerator:
                     categorical_columns.append(col)
         
         try:
-            # Create feature importance dictionary from domain insights
+
             feature_importance = {insight.feature_name: insight.importance 
                                  for insight in domain_insights}
-            
-            # Sort features by domain-based importance
+
             sorted_features = sorted(
                 [(feat, importance) for feat, importance in feature_importance.items()],
                 key=lambda x: x[1],
                 reverse=True
             )
-            
-            # Prioritize the most important features first (limit to top 10)
+
             top_features = [f[0] for f in sorted_features[:min(10, len(sorted_features))]]
             logger.info(f"Top features by domain importance: {top_features}")
-            
-            # Extract transformations recommended by domain knowledge
+
             recommended_transforms = self._extract_recommended_transformations(domain_insights)
             logger.info(f"Recommended transformations: {recommended_transforms}")
-            
-            # Apply basic transformations selectively based on domain importance
+
             result_df = self._apply_basic_transformations(
                 result_df, 
                 domain_insights, 
                 target_column, 
                 top_features
             )
-            
-            # Generate interaction features based on domain knowledge
+
             result_df = self._generate_interaction_features(
                 result_df, 
                 domain_insights,
                 target_column,
                 is_classification
             )
-            
-            # Apply domain-specific transformations
+
             result_df = self._apply_domain_transformations(
                 result_df, 
                 domain_insights,
                 recommended_transforms
             )
-            
-            # Handle categorical features
+
             for col in categorical_columns:
                 if col in result_df.columns and col != target_column:
-                    # One-hot encode categorical features
+
                     if "one_hot" in recommended_transforms.get(col, []):
                         one_hot_df = self._apply_one_hot_encoding(result_df[col])
                         for new_col in one_hot_df.columns:
@@ -139,11 +131,9 @@ class FeatureGenerator:
                                     parameters={},
                                     rationale="Categorical feature encoding",
                                 )
-            
-            # Generate text features if text columns present
+
             result_df = self._generate_text_features(result_df, domain_insights)
-            
-            # Evaluate transformation utility and keep only beneficial transformations
+
             if target_column:
                 result_df = self._evaluate_transformations(
                     result_df,
@@ -182,27 +172,24 @@ class FeatureGenerator:
         
         if target_column:
             numeric_cols = [col for col in numeric_cols if col != target_column]
-        
-        # Create mapping of features to suggested transformations
+
         feature_to_transforms = {}
         for insight in insights:
             feature_to_transforms[insight.feature_name] = set(insight.suggested_transformations)
         
         for col in numeric_cols:
-            # Apply transformations preferentially to top features
+
             is_top_feature = col in top_features
-            
-            # Get recommended transformations for this feature
+
             recommended = feature_to_transforms.get(col, set())
-            
-            # Log transformation for skewed features
+
             if (self._should_apply_log_transform(data[col]) and 
                 (is_top_feature or 'log' in recommended)):
-                # Ensure all values are valid for log1p (no negative values)
+
                 valid_data = data[col].copy()
                 if valid_data.min() < 0:
                     logger.warning(f"Column {col} contains negative values. Adjusting before log transformation.")
-                    # Option 1: Add the absolute minimum plus a small constant to make all values positive
+
                     offset = abs(valid_data.min()) + 1e-6
                     valid_data = valid_data + offset
                     transform_note = f" (offset: +{offset:.6f})"
@@ -217,8 +204,7 @@ class FeatureGenerator:
                     rationale=("High skewness detected" if 'log' not in recommended else 
                              "Log transform suggested by domain knowledge") + transform_note,
                 )
-            
-            # Standard scaling primarily for top features or when explicitly recommended
+
             if is_top_feature or 'zscore' in recommended or 'scale' in recommended:
                 result_df[f"scaled_{col}"] = self._fit_transform_scaler(data[col], col)
                 self.transformations[f"scaled_{col}"] = TransformationMetadata(
@@ -239,43 +225,34 @@ class FeatureGenerator:
     ) -> pd.DataFrame:
         """Generate interaction features between related variables based on domain knowledge."""
         result_df = data.copy()
-        
-        # Track interactions already created to avoid duplicates
+
         created_interactions = set()
-        
-        # Group insights by importance
+
         sorted_insights = sorted(insights, key=lambda x: x.importance, reverse=True)
-        
-        # Generate pairwise feature interactions based on domain relationships
+
         for insight in sorted_insights:
-            # Only process features actually in the dataset
+
             if insight.feature_name not in data.columns:
                 continue
-                
-            # Skip target column
+
             if target_column and insight.feature_name == target_column:
                 continue
-                
-            # Find valid relationships (features actually in the dataset)
+
             valid_relationships = [
                 rel for rel in insight.relationships 
                 if rel in data.columns and (not target_column or rel != target_column)
             ]
-            
-            # Handle multiplication between related features
+
             if ("multiply" in insight.suggested_transformations or
                 "interaction" in insight.suggested_transformations) and valid_relationships:
-                
-                # Limit number of interactions to prevent explosion
+
                 for related in valid_relationships[:min(3, len(valid_relationships))]:
                     interaction_name = f"multiply_{insight.feature_name}_{related}"
                     reverse_name = f"multiply_{related}_{insight.feature_name}"
-                    
-                    # Check if we've already created this interaction
+
                     if interaction_name in created_interactions or reverse_name in created_interactions:
                         continue
-                        
-                    # Create the interaction feature
+
                     result_df[interaction_name] = data[insight.feature_name] * data[related]
                     created_interactions.add(interaction_name)
                     
@@ -285,28 +262,25 @@ class FeatureGenerator:
                         parameters={},
                         rationale=f"Multiplication suggested by domain knowledge",
                     )
-        
-        # Generate polynomial interactions for top insights if polynomial transformation suggested
+
         for insight in sorted_insights[:5]:  # Only consider top 5 insights
             if insight.feature_name not in data.columns:
                 continue
                 
             if any(t.startswith('poly') for t in insight.suggested_transformations):
-                # Generate polynomial features for this feature with its relations
+
                 poly_features = [insight.feature_name] + [
                     rel for rel in insight.relationships[:2]  # Limit to top 2 relationships
                     if rel in data.columns and (not target_column or rel != target_column)
                 ]
                 
                 if len(poly_features) > 1:  # Only if we have at least 2 features
-                    # Create polynomial features
+
                     poly = PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)
                     poly_data = poly.fit_transform(data[poly_features])
-                    
-                    # Get feature names
+
                     poly_feature_names = poly.get_feature_names_out(poly_features)
-                    
-                    # Add polynomial features, skipping original features
+
                     for i, name in enumerate(poly_feature_names):
                         if ' ' in name:  # This is an interaction term
                             new_name = f"poly_{name.replace(' ', '_')}"
@@ -339,8 +313,7 @@ class FeatureGenerator:
         """
         result_df = data.copy()
         logger.info("Starting domain transformations")
-        
-        # Counters to limit the number of each type of transformation
+
         transform_counts = {}
         
         for insight in insights:
@@ -351,28 +324,22 @@ class FeatureGenerator:
             
             logger.info(f"Processing feature: {feature}")
             logger.info(f"Suggested transformations: {insight.suggested_transformations}")
-            
-            # Track features already transformed
+
             transformed_features = set()
-            
-            # Only apply transformations if they're explicitly suggested by domain knowledge
+
             transforms_to_apply = recommended_transforms.get(feature, [])
-            
-            # Apply each transformation (limiting the number of each type)
+
             for transform in transforms_to_apply:
                 transform_type = transform.split('=')[0].strip()
-                
-                # Skip if we've already reached the maximum for this transform type
+
                 if transform_counts.get(transform_type, 0) >= self.max_features_per_type:
                     continue
-                
-                # Update counter
+
                 transform_counts[transform_type] = transform_counts.get(transform_type, 0) + 1
-                
-                # Apply the transformation
+
                 try:
                     if transform.startswith("log") and feature not in transformed_features:
-                        # Log transformation (if data is positive)
+
                         if data[feature].min() > 0:
                             new_feature_name = f"log_{feature}"
                             result_df[new_feature_name] = np.log(data[feature])
@@ -385,15 +352,14 @@ class FeatureGenerator:
                             )
                             logger.info(f"Applied log transform to {feature}")
                         else:
-                            # Log1p for data that includes zeros
+
                             new_feature_name = f"log1p_{feature}"
-                            
-                            # Check for negative values and adjust if needed
+
                             valid_data = data[feature].copy()
                             offset = 0
                             if valid_data.min() < 0:
                                 logger.warning(f"Column {feature} contains negative values. Adjusting before log1p transformation.")
-                                # Add the absolute minimum plus a small constant to make all values positive
+
                                 offset = abs(valid_data.min()) + 1e-6
                                 valid_data = valid_data + offset
                                 transform_note = f" (offset: +{offset:.6f})"
@@ -411,7 +377,7 @@ class FeatureGenerator:
                             logger.info(f"Applied log1p transform to {feature}")
                     
                     elif transform.startswith("sqrt") and feature not in transformed_features:
-                        # Square root transformation
+
                         if data[feature].min() >= 0:
                             new_feature_name = f"sqrt_{feature}"
                             result_df[new_feature_name] = np.sqrt(data[feature])
@@ -425,7 +391,7 @@ class FeatureGenerator:
                             logger.info(f"Applied sqrt transform to {feature}")
                     
                     elif transform.startswith("square") and feature not in transformed_features:
-                        # Square transformation
+
                         new_feature_name = f"square_{feature}"
                         result_df[new_feature_name] = np.power(data[feature], 2)
                         transformed_features.add(feature)
@@ -438,7 +404,7 @@ class FeatureGenerator:
                         logger.info(f"Applied square transform to {feature}")
                     
                     elif transform.startswith("cube") and feature not in transformed_features:
-                        # Cube transformation
+
                         new_feature_name = f"cube_{feature}"
                         result_df[new_feature_name] = np.power(data[feature], 3)
                         transformed_features.add(feature)
@@ -451,7 +417,7 @@ class FeatureGenerator:
                         logger.info(f"Applied cube transform to {feature}")
                     
                     elif transform.startswith("bin") and feature not in transformed_features:
-                        # Binning transformation
+
                         n_bins = 5  # Default number of bins
                         if "bins=" in transform:
                             try:
@@ -462,7 +428,7 @@ class FeatureGenerator:
                         new_feature_name = f"binned_{feature}"
                         
                         try:
-                            # Use the more robust binning method
+
                             result_df[new_feature_name] = self._apply_binning(data[feature], n_bins=n_bins)
                             transformed_features.add(feature)
                             
@@ -477,7 +443,7 @@ class FeatureGenerator:
                             logger.warning(f"Error applying binning to {feature}: {str(e)}")
                     
                     elif transform.startswith("zscore") and feature not in transformed_features:
-                        # Z-score normalization
+
                         new_feature_name = f"zscore_{feature}"
                         result_df[new_feature_name] = (data[feature] - data[feature].mean()) / data[feature].std()
                         transformed_features.add(feature)
@@ -490,7 +456,7 @@ class FeatureGenerator:
                         logger.info(f"Applied z-score transform to {feature}")
                     
                     elif transform.startswith("minmax") and feature not in transformed_features:
-                        # Min-max scaling
+
                         new_feature_name = f"minmax_{feature}"
                         result_df[new_feature_name] = (data[feature] - data[feature].min()) / (data[feature].max() - data[feature].min())
                         transformed_features.add(feature)
@@ -503,14 +469,13 @@ class FeatureGenerator:
                         logger.info(f"Applied min-max transform to {feature}")
                     
                     elif transform.startswith("one_hot") and feature not in transformed_features:
-                        # One-hot encoding for categorical features
+
                         try:
-                            # Use the more robust one-hot encoding method
+
                             encoded_df = self._apply_one_hot_encoding(data[feature])
-                            
-                            # Only proceed if we got some encoded columns
+
                             if not encoded_df.empty:
-                                # Add each encoded column to the result
+
                                 for col in encoded_df.columns:
                                     result_df[col] = encoded_df[col]
                                     self.transformations[col] = TransformationMetadata(
@@ -525,10 +490,9 @@ class FeatureGenerator:
                                 logger.warning(f"One-hot encoding produced no columns for {feature}")
                         except Exception as e:
                             logger.warning(f"Error applying one-hot encoding to {feature}: {str(e)}")
-                    
-                    # scipy.stats transformations
+
                     elif transform.startswith("boxcox") and feature not in transformed_features:
-                        # Box-Cox transformation for positive data
+
                         if data[feature].min() > 0:
                             new_feature_name = f"boxcox_{feature}"
                             result_df[new_feature_name], _ = stats.boxcox(data[feature])
@@ -542,7 +506,7 @@ class FeatureGenerator:
                             logger.info(f"Applied Box-Cox transform to {feature}")
                     
                     elif transform.startswith("yeojohnson") and feature not in transformed_features:
-                        # Yeo-Johnson transformation (works with negative values)
+
                         new_feature_name = f"yeojohnson_{feature}"
                         result_df[new_feature_name], _ = stats.yeojohnson(data[feature])
                         transformed_features.add(feature)
@@ -555,7 +519,7 @@ class FeatureGenerator:
                         logger.info(f"Applied Yeo-Johnson transform to {feature}")
                     
                     elif transform.startswith("quantile") and feature not in transformed_features:
-                        # Quantile transformation to normal distribution
+
                         new_feature_name = f"quantile_{feature}"
                         result_df[new_feature_name] = stats.norm.ppf(
                             stats.rankdata(data[feature]) / (len(data[feature]) + 1)
@@ -584,14 +548,12 @@ class FeatureGenerator:
         """Generate features from text columns."""
         result_df = data.copy()
         text_cols = data.select_dtypes(include=['object']).columns
-        
-        # Get text columns specifically mentioned in domain insights
+
         text_insights = [insight for insight in insights 
                          if insight.feature_name in text_cols and 
                          any(t.startswith("text") or t.startswith("tfidf") or t.startswith("nlp") 
                              for t in insight.suggested_transformations)]
-        
-        # If no specific text columns are highlighted, check all potential text columns
+
         if not text_insights:
             for col in text_cols:
                 if self._is_text_column(data[col]):
@@ -613,7 +575,7 @@ class FeatureGenerator:
                     except Exception as e:
                         logger.warning(f"Failed to vectorize text column {col}: {str(e)}")
         else:
-            # Process only text columns mentioned in domain insights
+
             for insight in text_insights:
                 col = insight.feature_name
                 vectorizer = TfidfVectorizer(max_features=7)
@@ -645,7 +607,7 @@ class FeatureGenerator:
     ) -> pd.DataFrame:
         """Evaluate the utility of transformations using XGBoost with anti-overfitting techniques."""
         try:
-            # Group transformations by type for evaluation
+
             transform_groups = {}
             for col in transformed_data.columns:
                 if col in self.transformations:
@@ -657,15 +619,12 @@ class FeatureGenerator:
             if not transform_groups:
                 logger.info("No transformations to evaluate")
                 return transformed_data
-            
-            # Import XGBoost
+
             import xgboost as xgb
-            
-            # Prepare data for evaluation
+
             X = original_data.drop(columns=[target_column])
             y = original_data[target_column]
-            
-            # Use stratified sampling to preserve class distribution
+
             from sklearn.model_selection import train_test_split
             if is_classification:
                 X_train, X_val, y_train, y_val = train_test_split(
@@ -675,8 +634,7 @@ class FeatureGenerator:
                 X_train, X_val, y_train, y_val = train_test_split(
                     X, y, test_size=0.3, random_state=42
                 )
-            
-            # Select evaluation model and metrics based on problem type
+
             if is_classification:
                 if len(np.unique(y)) == 2:
                     scoring_func = roc_auc_score
@@ -728,17 +686,14 @@ class FeatureGenerator:
                     'random_state': 42,
                     'enable_categorical': True
                 }
-            
-            # Train baseline model on original features with early stopping
+
             baseline_model = model_class(**model_params)
-            
-            # Handle potential issues in validation data
+
             X_val_orig = X.iloc[X_val.index].copy()
             eval_metric = 'auc' if is_classification and len(np.unique(y)) == 2 else ('error' if is_classification else 'rmse')
-            
-            # Fit with early stopping to prevent overfitting
+
             try:
-                # Check XGBoost version to use appropriate API
+
                 xgb_version = xgb.__version__
                 major_version = 0
                 try:
@@ -747,7 +702,7 @@ class FeatureGenerator:
                     logger.warning(f"Error parsing XGBoost version: {str(ve)}")
                 
                 if major_version >= 2:
-                    # XGBoost 2.0+ approach
+
                     baseline_model.fit(
                         X_train, y_train,
                         eval_set=[(X_val_orig, y_val)],
@@ -756,7 +711,7 @@ class FeatureGenerator:
                         verbose=False
                     )
                 else:
-                    # Pre-2.0 approach 
+
                     baseline_model.fit(
                         X_train, y_train,
                         eval_set=[(X_val_orig, y_val)],
@@ -767,23 +722,22 @@ class FeatureGenerator:
             except TypeError as e:
                 if "early_stopping_rounds" in str(e):
                     logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
-                    # Fallback to using just eval_set without early_stopping_rounds
+
                     baseline_model.fit(
                         X_train, y_train,
                         eval_set=[(X_val_orig, y_val)],
                         verbose=False
                     )
                 else:
-                    # Some other TypeError
+
                     logger.error(f"XGBoost fit error: {str(e)}")
                     raise
             except Exception as e:
                 logger.error(f"Error in baseline model fitting: {str(e)}")
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                # Fallback to simpler model without validation
+
                 baseline_model.fit(X_train, y_train)
-            
-            # Get baseline performance
+
             if is_classification and len(np.unique(y)) == 2:
                 y_prob = baseline_model.predict_proba(X_val_orig)[:, 1]
                 baseline_score = scoring_func(y_val, y_prob)
@@ -792,22 +746,17 @@ class FeatureGenerator:
                 baseline_score = scoring_func(y_val, y_pred)
             
             logger.info(f"Baseline model performance: {baseline_score:.4f}")
-            
-            # Keep track of features from original data and beneficial transformations
+
             beneficial_features = list(original_data.columns)
             feature_gains = {}
-            
-            # Store performance improvement by transformation type
+
             transform_performance = {}
-            
-            # Evaluate each transformation type
+
             for transform_type, cols in transform_groups.items():
                 logger.info(f"Evaluating {transform_type} transformations ({len(cols)} features)")
-                
-                # Create model for this transformation type
+
                 eval_model = model_class(**model_params)
-                
-                # Get transformed data with these specific transformed features + original features
+
                 X_trans = pd.concat([
                     X,  # original features
                     transformed_data[cols]  # only the current transformation group
@@ -815,10 +764,9 @@ class FeatureGenerator:
                 
                 X_train_trans = X_trans.iloc[X_train.index]
                 X_val_trans = X_trans.iloc[X_val.index]
-                
-                # Fit model with early stopping
+
                 try:
-                    # Check XGBoost version to use appropriate API
+
                     xgb_version = xgb.__version__
                     major_version = 0
                     try:
@@ -827,7 +775,7 @@ class FeatureGenerator:
                         logger.warning(f"Error parsing XGBoost version: {str(ve)}")
                     
                     if major_version >= 2:
-                        # XGBoost 2.0+ approach
+
                         eval_model.fit(
                             X_train_trans, y_train,
                             eval_set=[(X_val_trans, y_val)],
@@ -836,7 +784,7 @@ class FeatureGenerator:
                             verbose=False
                         )
                     else:
-                        # Pre-2.0 approach
+
                         eval_model.fit(
                             X_train_trans, y_train,
                             eval_set=[(X_val_trans, y_val)],
@@ -847,23 +795,22 @@ class FeatureGenerator:
                 except TypeError as e:
                     if "early_stopping_rounds" in str(e):
                         logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
-                        # Fallback to using just eval_set without early_stopping_rounds
+
                         eval_model.fit(
                             X_train_trans, y_train,
                             eval_set=[(X_val_trans, y_val)],
                             verbose=False
                         )
                     else:
-                        # Some other TypeError
+
                         logger.error(f"XGBoost fit error: {str(e)}")
                         raise
                 except Exception as e:
                     logger.error(f"Error in transformation model fitting: {str(e)}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
-                    # Fallback to simpler model without validation
+
                     eval_model.fit(X_train_trans, y_train)
-                
-                # Evaluate performance
+
                 try:
                     if is_classification and len(np.unique(y)) == 2:
                         y_prob = eval_model.predict_proba(X_val_trans)[:, 1]
@@ -871,29 +818,25 @@ class FeatureGenerator:
                     else:
                         y_pred = eval_model.predict(X_val_trans)
                         score = scoring_func(y_val, y_pred)
-                    
-                    # Calculate improvement
+
                     improvement = score - baseline_score
                     transform_performance[transform_type] = improvement
                     logger.info(f"{transform_type} transformation performance: {score:.4f} (improvement: {improvement:.4f})")
                 except Exception as e:
                     logger.error(f"Error evaluating transformation performance: {str(e)}")
-                    # Use a conservative approach - assume no improvement
+
                     improvement = -0.01
                     transform_performance[transform_type] = improvement
                     logger.warning(f"Using fallback score for {transform_type} transformations")
-                
-                # Keep transformations that don't degrade performance
-                # Use a small negative threshold to accommodate for randomness
+
+
                 if improvement >= -0.01:  # Allow slight performance degradation due to randomness
                     beneficial_features.extend(cols)
-                    
-                    # Get feature importance for these transformations
+
                     try:
                         importances = eval_model.feature_importances_
                         feature_names = list(X_train_trans.columns)
-                        
-                        # Record importance for the transformed features
+
                         for col in cols:
                             if col in feature_names:
                                 col_idx = feature_names.index(col)
@@ -901,20 +844,17 @@ class FeatureGenerator:
                                 feature_gains[col] = imp_value
                     except Exception as e:
                         logger.error(f"Error getting feature importances: {str(e)}")
-                        # Set default importance values
+
                         for col in cols:
                             feature_gains[col] = 0.01  # Small default value
-            
-            # Output performance by transformation type
+
             logger.info("Performance improvement by transformation type:")
             for t_type, improvement in sorted(transform_performance.items(), key=lambda x: x[1], reverse=True):
                 logger.info(f"  {t_type}: {improvement:.4f}")
-            
-            # Keep only beneficial features from the transformed data
+
             beneficial_features = list(set(beneficial_features))  # Remove duplicates
             result_df = transformed_data[beneficial_features].copy()
-            
-            # Log removed features
+
             removed_features = set(transformed_data.columns) - set(beneficial_features)
             if removed_features:
                 logger.info(f"Removed {len(removed_features)} non-beneficial transformed features")
@@ -925,7 +865,7 @@ class FeatureGenerator:
         except Exception as e:
             logger.error(f"Error in transformation evaluation: {str(e)}")
             logger.error(traceback.format_exc())
-            # If evaluation fails, return the original transformed data
+
             return transformed_data
     
     @staticmethod
@@ -948,19 +888,18 @@ class FeatureGenerator:
         sample = series.dropna().head(100)
         if len(sample) == 0:
             return False
-        # Consider it text if at least 20% of values have more than 3 words
+
         text_values = [x for x in sample if isinstance(x, str) and len(x.split()) > 3]
         return len(text_values) >= max(1, 0.2 * len(sample))
     
     def _apply_binning(self, series: pd.Series, n_bins: int = 5) -> pd.Series:
         """Apply equal-width binning to a numerical feature."""
         try:
-            # Handle non-numeric data
+
             if not pd.api.types.is_numeric_dtype(series):
                 logger.warning(f"Cannot apply binning to non-numeric column: {series.name}")
                 return series
-                
-            # Create bins using pandas cut
+
             binned = pd.cut(
                 series,
                 bins=n_bins,
@@ -968,11 +907,10 @@ class FeatureGenerator:
                 include_lowest=True,
                 duplicates='drop'
             )
-            
-            # Handle potential NaN values
+
             if binned.isna().any():
                 logger.warning(f"Binning produced NaN values for column {series.name}")
-                # Replace NaNs with most frequent bin
+
                 mode_bin = binned.mode().iloc[0] if not binned.dropna().empty else 0
                 binned = binned.fillna(mode_bin)
                 
@@ -985,16 +923,15 @@ class FeatureGenerator:
     def _apply_one_hot_encoding(self, series: pd.Series) -> pd.DataFrame:
         """Apply one-hot encoding to a categorical feature."""
         try:
-            # For numeric columns, convert to string first to treat as categorical
+
             if pd.api.types.is_numeric_dtype(series):
                 series = series.astype(str)
-                
-            # Use pandas get_dummies
+
             encoded = pd.get_dummies(series, prefix=f"onehot_{series.name}")
             
             return encoded
             
         except Exception as e:
             logger.warning(f"Error applying one-hot encoding to {series.name}: {str(e)}")
-            # Return empty DataFrame on error
+
             return pd.DataFrame(index=series.index) 

@@ -25,13 +25,12 @@ def plot_metrics_comparison(
     Returns:
         Matplotlib Figure object
     """
-    # Get test metrics
+
     if is_classification:
         metrics = ['accuracy', 'f1', 'roc_auc']
     else:
         metrics = ['r2', 'mae', 'rmse']
-    
-    # Create a DataFrame for plotting
+
     plot_data = []
     
     for metric in metrics:
@@ -56,33 +55,26 @@ def plot_metrics_comparison(
         })
     
     df = pd.DataFrame(plot_data)
-    
-    # Create the plot
+
     fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Create grouped bar chart
+
     sns.barplot(data=df, x='Metric', y='Value', hue='Model', ax=ax)
-    
-    # Add labels and title
+
     ax.set_title('Model Performance Comparison (Test Metrics)', fontsize=14)
     ax.set_xlabel('Metric', fontsize=12)
     ax.set_ylabel('Value', fontsize=12)
-    
-    # Add legend
+
     ax.legend(title='Model')
-    
-    # Set y-limits based on metric type
+
     for metric in metrics:
         if metric in ['mae', 'rmse']:
-            # For error metrics, lower is better, so invert the y-axis
+
             current_min, current_max = ax.get_ylim()
             if current_min > 0:
                 ax.set_ylim(0, current_max * 1.1)
-    
-    # Add grid
+
     ax.grid(axis='y', linestyle='--', alpha=0.7)
-    
-    # Adjust layout
+
     plt.tight_layout()
     
     return fig
@@ -102,32 +94,26 @@ def plot_feature_importance(
     Returns:
         Matplotlib Figure object
     """
-    # Convert to Series if it's a dictionary
+
     if isinstance(feature_importances, dict):
         importances = pd.Series(feature_importances)
     else:
         importances = feature_importances
-    
-    # Sort and get top N features
+
     importances = importances.sort_values(ascending=False)
     if len(importances) > top_n:
         importances = importances.head(top_n)
-    
-    # Create the plot
+
     fig, ax = plt.subplots(figsize=(10, max(6, len(importances) * 0.3)))
-    
-    # Plot horizontal bar chart
+
     importances.plot(kind='barh', ax=ax)
-    
-    # Add labels and title
+
     ax.set_title(f'Top {len(importances)} Feature Importances', fontsize=14)
     ax.set_xlabel('Importance', fontsize=12)
     ax.set_ylabel('Feature', fontsize=12)
-    
-    # Add grid
+
     ax.grid(axis='x', linestyle='--', alpha=0.7)
-    
-    # Adjust layout
+
     plt.tight_layout()
     
     return fig 

@@ -33,8 +33,7 @@ def setup_logging(
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
-    
-    # Add file handler if log file specified
+
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file)
@@ -51,29 +50,23 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
         Logger instance
     """
     logger = logging.getLogger(name)
-    
-    # Only add handlers if they haven't been added yet
+
     if not logger.handlers:
-        # Set logging level to DEBUG
+
         logger.setLevel(logging.DEBUG)
-        
-        # Create console handler with a higher debug level
+
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)
-        
-        # Create formatter
+
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        
-        # Add formatter to console handler
+
         console_handler.setFormatter(formatter)
-        
-        # Add console handler to logger
+
         logger.addHandler(console_handler)
-        
-        # Prevent the logger from propagating messages to the root logger
+
         logger.propagate = False
     
     return logger 

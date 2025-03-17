@@ -20,12 +20,10 @@ from typing import Dict, List, Tuple, Any, Optional, Union
 import logging
 import copy
 
-# Import FASTER components
 from faster.pipeline import Pipeline, PipelineConfig
 from faster.feature_selection import SelectionCriteria
 from faster.domain_knowledge import DomainKnowledgeExtractor
 
-# Import utility modules
 from utils.datasets import (
     load_iris_dataset, 
     load_auto_mpg_dataset, 
@@ -35,11 +33,9 @@ from utils.datasets import (
 from utils.evaluation import evaluate_model
 from utils.visualization import plot_feature_importance, plot_metrics_comparison
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Set page configuration
 st.set_page_config(
     page_title="FASTER Pipeline Demo",
     page_icon="🚀",
@@ -47,7 +43,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# App title and description
 st.title("🚀 FASTER Pipeline Demo")
 st.markdown("""
 This application demonstrates the **Feature Automation, Selection, Transformation, Extraction Routine (FASTER)** 
@@ -59,10 +54,9 @@ You can either select from predefined datasets or upload your own dataset to see
 
 def main():
     """Main function to run the Streamlit app."""
-    # Sidebar for dataset selection and configuration
+
     st.sidebar.title("Configuration")
-    
-    # Dataset selection
+
     dataset_option = st.sidebar.radio(
         "Select Dataset Source",
         ["Predefined Dataset", "Upload Dataset"]
@@ -74,21 +68,18 @@ def main():
         data, target_column, is_classification, problem_description = load_custom_dataset()
     
     if data is not None:
-        # Display dataset information
+
         with st.expander("Dataset Information", expanded=True):
             st.write(f"Dataset shape: {data.shape}")
             st.write(f"Target column: {target_column}")
             st.write(f"Problem type: {'Classification' if is_classification else 'Regression'}")
             st.dataframe(data.head())
-        
-        # Pipeline configuration options
+
         st.sidebar.header("Pipeline Configuration")
-        
-        # LLM Configuration
+
         st.sidebar.subheader("LLM Configuration")
         api_key = st.sidebar.text_input("OpenRouter API Key (optional)", type="password")
-        
-        # If no API key is provided, use mock mode
+
         use_mock = not bool(api_key.strip())
         if use_mock:
             st.sidebar.warning("No API key provided. Using mock LLM responses.")
@@ -100,8 +91,7 @@ def main():
         )
         
         temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
-        
-        # Feature Engineering Configuration
+
         st.sidebar.subheader("Feature Engineering Configuration")
         max_interaction_degree = st.sidebar.slider("Max Interaction Degree", 1, 3, 2)
         alpha = st.sidebar.slider("Statistical Significance Level (alpha)", 0.01, 0.1, 0.05, 0.01)
@@ -110,11 +100,10 @@ def main():
             ["fdr_bh", "bonferroni", "sidak", "holm", "none"],
             index=0
         )
-        
-        # Run the pipeline
+
         if st.button("Run FASTER Pipeline"):
             with st.spinner("Running FASTER Pipeline..."):
-                # Set up pipeline configuration
+
                 config = PipelineConfig(
                     model_name=model_name,
                     temperature=temperature,
@@ -127,12 +116,10 @@ def main():
                     save_intermediate=False,
                     keep_all_features=True
                 )
-                
-                # Pass API key directly instead of setting environment variable
-                # if api_key:
-                #     os.environ["OPENROUTER_API_KEY"] = api_key
-                
-                # Run pipeline with and without domain knowledge
+
+
+
+
                 results = run_pipeline(
                     data=data,
                     target_column=target_column,
@@ -142,8 +129,7 @@ def main():
                     use_mock=use_mock,
                     api_key=api_key
                 )
-                
-                # Display results
+
                 display_results(results, data, target_column, is_classification)
 
 def load_predefined_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bool, str]:
@@ -248,21 +234,18 @@ def load_custom_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bool, 
                 data = pd.read_csv(uploaded_file)
             else:
                 data = pd.read_excel(uploaded_file)
-                
-            # Let user select target column
+
             target_column = st.sidebar.selectbox(
                 "Select Target Column",
                 data.columns.tolist()
             )
-            
-            # Let user specify problem type
+
             problem_type = st.sidebar.radio(
                 "Problem Type",
                 ["Classification", "Regression"]
             )
             is_classification = problem_type == "Classification"
-            
-            # Let user input problem description
+
             problem_description = st.sidebar.text_area(
                 "Problem Description (include domain knowledge if available)",
                 height=150,
@@ -300,26 +283,21 @@ def run_pipeline(
     Returns:
         Dictionary containing pipeline results and evaluation metrics
     """
-    # Copy data to avoid modifications
+
     data_copy = data.copy()
-    
-    # Split features and target
+
     X = data_copy.drop(target_column, axis=1)
     y = data_copy[target_column]
-    
-    # Evaluate baseline model
+
     st.info("Evaluating baseline model...")
     baseline_scores = evaluate_model(X, y, is_classification)
-    
-    # Create FASTER pipeline
+
     pipeline_no_domain = Pipeline(config)
-    
-    # For the pipeline that uses domain knowledge, pass the API key
-    # Create a config copy to include the API key
+
+
     domain_config = copy.deepcopy(config)
     pipeline_with_domain = Pipeline(domain_config, api_key=api_key)
-    
-    # Run pipeline without domain knowledge
+
     st.info("Running FASTER pipeline without domain knowledge...")
     result_no_domain = pipeline_no_domain.run(
         data=data_copy,
@@ -328,8 +306,7 @@ def run_pipeline(
         is_classification=is_classification,
         keep_all_features=True
     )
-    
-    # Run pipeline with domain knowledge
+
     st.info("Running FASTER pipeline with domain knowledge...")
     result_with_domain = pipeline_with_domain.run(
         data=data_copy,
@@ -338,23 +315,19 @@ def run_pipeline(
         is_classification=is_classification,
         keep_all_features=True
     )
-    
-    # Get transformed data
+
     no_domain_features = result_no_domain.transformed_data
     with_domain_features = result_with_domain.transformed_data
-    
-    # Drop target column from transformed data
+
     if target_column in no_domain_features.columns:
         no_domain_features = no_domain_features.drop(target_column, axis=1)
     if target_column in with_domain_features.columns:
         with_domain_features = with_domain_features.drop(target_column, axis=1)
-    
-    # Evaluate FASTER models
+
     st.info("Evaluating FASTER models...")
     faster_no_domain_scores = evaluate_model(no_domain_features, y, is_classification)
     faster_with_domain_scores = evaluate_model(with_domain_features, y, is_classification)
-    
-    # Return results
+
     return {
         "baseline_scores": baseline_scores,
         "faster_no_domain_scores": faster_no_domain_scores,
@@ -381,8 +354,7 @@ def display_results(
         is_classification: Whether it's a classification problem
     """
     st.header("🔍 Results")
-    
-    # Extract results
+
     baseline_scores = results["baseline_scores"]
     faster_no_domain_scores = results["faster_no_domain_scores"]
     faster_with_domain_scores = results["faster_with_domain_scores"]
@@ -390,15 +362,12 @@ def display_results(
     with_domain_features = results["with_domain_features"]
     result_no_domain = results["result_no_domain"]
     result_with_domain = results["result_with_domain"]
-    
-    # Create tabs for different views
+
     tabs = st.tabs(["Performance Metrics", "Feature Analysis", "Data Transformation", "Pipeline Details"])
-    
-    # Performance Metrics Tab
+
     with tabs[0]:
         st.subheader("Model Performance Comparison")
-        
-        # Create columns for the three models
+
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -412,8 +381,7 @@ def display_results(
         with col3:
             st.markdown("### FASTER (With Domain Knowledge)")
             display_metrics(faster_with_domain_scores, is_classification, baseline_scores)
-        
-        # Plot metrics comparison
+
         st.subheader("Metrics Comparison")
         fig = plot_metrics_comparison(
             baseline_scores, 
@@ -422,12 +390,10 @@ def display_results(
             is_classification
         )
         st.pyplot(fig)
-    
-    # Feature Analysis Tab
+
     with tabs[1]:
         st.subheader("Feature Analysis")
-        
-        # Feature counts
+
         st.markdown("### Feature Counts")
         col1, col2, col3 = st.columns(3)
         
@@ -447,8 +413,7 @@ def display_results(
                 len(with_domain_features.columns),
                 len(with_domain_features.columns) - len(data.drop(target_column, axis=1).columns)
             )
-        
-        # Feature lists
+
         st.markdown("### Selected Features")
         
         col1, col2 = st.columns(2)
@@ -466,8 +431,7 @@ def display_results(
                 st.write(sorted(result_with_domain.selected_features))
             else:
                 st.write("No features selected")
-        
-        # Feature importance (if available)
+
         st.markdown("### Feature Importance")
         try:
             if hasattr(result_with_domain, "feature_importances") and result_with_domain.feature_importances is not None:
@@ -477,12 +441,10 @@ def display_results(
                 st.info("Feature importance information not available")
         except Exception as e:
             st.error(f"Could not plot feature importance: {str(e)}")
-    
-    # Data Transformation Tab
+
     with tabs[2]:
         st.subheader("Data Transformation")
-        
-        # Show samples of transformed data
+
         st.markdown("### Transformed Data Samples")
         
         col1, col2 = st.columns(2)
@@ -494,20 +456,17 @@ def display_results(
         with col2:
             st.markdown("#### FASTER (With Domain Knowledge)")
             st.dataframe(with_domain_features.head())
-    
-    # Pipeline Details Tab
+
     with tabs[3]:
         st.subheader("Pipeline Details")
-        
-        # Show domain knowledge
+
         st.markdown("### Domain Knowledge Extraction")
         
         if hasattr(result_with_domain, "domain_knowledge") and result_with_domain.domain_knowledge:
             st.json(result_with_domain.domain_knowledge)
         else:
             st.info("Domain knowledge information not available")
-        
-        # Show statistical tests
+
         st.markdown("### Statistical Tests")
         
         if hasattr(result_with_domain, "statistical_tests") and result_with_domain.statistical_tests:
@@ -524,35 +483,30 @@ def display_metrics(metrics: Dict[str, float], is_classification: bool, baseline
         is_classification: Whether it's a classification problem
         baseline_metrics: Baseline metrics for comparison (optional)
     """
-    # Get test metrics
+
     test_metrics = {k.replace('test_', ''): v for k, v in metrics.items() if k.startswith('test_')}
-    
-    # Get train metrics
+
     train_metrics = {k.replace('train_', ''): v for k, v in metrics.items() if k.startswith('train_')}
-    
-    # Display test metrics
+
     st.markdown("#### Test Metrics")
     for metric, value in test_metrics.items():
         if baseline_metrics is not None:
             baseline_value = baseline_metrics.get(f'test_{metric}', 0)
             delta = value - baseline_value
-            
-            # For error metrics, lower is better
+
             if metric in ['mae', 'rmse']:
                 delta = -delta
                 
             st.metric(label=metric, value=f"{value:.4f}", delta=f"{delta:.4f}")
         else:
             st.metric(label=metric, value=f"{value:.4f}")
-    
-    # Display train metrics
+
     st.markdown("#### Train Metrics")
     for metric, value in train_metrics.items():
         if baseline_metrics is not None:
             baseline_value = baseline_metrics.get(f'train_{metric}', 0)
             delta = value - baseline_value
-            
-            # For error metrics, lower is better
+
             if metric in ['mae', 'rmse']:
                 delta = -delta
                 

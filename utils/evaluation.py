@@ -23,16 +23,14 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series, is_classification: bool) -> Di
     Returns:
         Dictionary of evaluation metrics
     """
-    # Encode categorical target variables if needed
+
     if is_classification and y.dtype == 'object':
         label_encoder = LabelEncoder()
         y = label_encoder.fit_transform(y)
-    
-    # Identify categorical and numerical features
+
     categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
     numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
-    
-    # Create preprocessing pipeline
+
     transformers = []
     
     if numerical_features:
@@ -40,8 +38,7 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series, is_classification: bool) -> Di
     
     if categorical_features:
         transformers.append(('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features))
-    
-    # Only create preprocessor if we have transformers
+
     if transformers:
         preprocessor = ColumnTransformer(
             transformers=transformers,
@@ -66,8 +63,7 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series, is_classification: bool) -> Di
             'mae': 'neg_mean_absolute_error',
             'rmse': 'neg_root_mean_squared_error'
         }
-    
-    # Create full pipeline with preprocessing and model
+
     if preprocessor:
         model = SklearnPipeline([
             ('preprocessor', preprocessor),
@@ -75,8 +71,7 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series, is_classification: bool) -> Di
         ])
     else:
         model = base_model
-    
-    # Perform cross-validation
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         cv_results = cross_validate(
@@ -85,21 +80,18 @@ def evaluate_model(X: pd.DataFrame, y: pd.Series, is_classification: bool) -> Di
             scoring=scoring,
             return_train_score=True
         )
-    
-    # Calculate mean scores
+
     result = {}
-    
-    # Process test scores
+
     for metric, scores in [(k.replace('test_', ''), v) for k, v in cv_results.items() if k.startswith('test_')]:
-        # Negate error metrics to get positive values
+
         if metric in ['mae', 'rmse']:
             result[f'test_{metric}'] = -scores.mean()
         else:
             result[f'test_{metric}'] = scores.mean()
-    
-    # Process train scores
+
     for metric, scores in [(k.replace('train_', ''), v) for k, v in cv_results.items() if k.startswith('train_')]:
-        # Negate error metrics to get positive values
+
         if metric in ['mae', 'rmse']:
             result[f'train_{metric}'] = -scores.mean()
         else:

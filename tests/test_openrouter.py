@@ -4,14 +4,12 @@ import os
 import requests
 import json
 
-# Get API key from environment
 api_key = os.environ.get("OPENROUTER_API_KEY")
 if not api_key:
     raise ValueError("OPENROUTER_API_KEY environment variable is not set")
 
 print(f"Using API key: {api_key[:5]}...{api_key[-5:]}")
 
-# Test a simple completion using direct HTTP request
 try:
     response = requests.post(
         url="https://openrouter.ai/api/v1/chat/completions",

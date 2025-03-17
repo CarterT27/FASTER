@@ -6,7 +6,6 @@ import numpy as np
 import logging
 import os
 
-# Configure logging for tests
 @pytest.fixture(autouse=True)
 def setup_logging():
     """Configure logging for all tests."""
@@ -15,17 +14,14 @@ def setup_logging():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-# Ensure test environment is properly set up
 @pytest.fixture(autouse=True)
 def setup_test_env():
     """Set up test environment variables."""
-    # Originally set a dummy OpenRouter API key
-    # That code has been removed to prevent overwriting the real API key
-    
-    # Clean up after tests
+
+
+
     yield
-    
-    # No cleanup needed as we no longer set any environment variables
+
 
 @pytest.fixture
 def numeric_data():
@@ -74,30 +70,26 @@ def colored_metric_output(metric_name: str, model_score: float, baseline_score: 
     Returns:
         Formatted string with appropriate color (green for better, red for worse)
     """
-    # Define ANSI color codes
+
     GREEN = '\033[92m'  # Bright green
     RED = '\033[91m'    # Bright red
     RESET = '\033[0m'   # Reset to default
-    
-    # For error metrics (like RMSE, MAE), lower is better
+
     error_metrics = ['rmse', 'mae', 'error', 'loss']
     is_error_metric = any(err in metric_name.lower() for err in error_metrics)
-    
-    # Determine if the model outperformed the baseline
+
     if is_error_metric:
         is_better = model_score < baseline_score
     else:
         is_better = model_score > baseline_score
-    
-    # Format the difference with proper sign
+
     diff = model_score - baseline_score
     diff_str = f"{diff:.4f}"
     if not is_error_metric:
         diff_str = f"+{diff_str}" if diff > 0 else f"{diff_str}"
     else:
         diff_str = f"{diff_str}" if diff > 0 else f"{diff_str}"
-    
-    # Apply color based on whether it's better or worse
+
     color = GREEN if is_better else RED
     
     return f"{metric_name}: {color}{model_score:.4f} ({diff_str}){RESET}" 

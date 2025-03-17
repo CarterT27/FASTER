@@ -56,7 +56,7 @@ class DomainKnowledgeExtractor:
             prompt_config: Custom prompt configuration
             api_key: OpenRouter API key (overrides environment variable if provided)
         """
-        # Use provided API key or get from environment
+
         if api_key:
             self.api_key = api_key.strip()
         elif "OPENROUTER_API_KEY" in os.environ:
@@ -72,15 +72,13 @@ class DomainKnowledgeExtractor:
 
         self.model_name = model_name
         self.temperature = temperature
-        
-        # Configure OpenRouter client with API key
-        # Set up the client according to OpenRouter documentation
+
+
         self.client = OpenAI(
             api_key=self.api_key,
             base_url="https://openrouter.ai/api/v1",
         )
-        
-        # Log key information (masked)
+
         masked_key = self.api_key[:4] + "..." + self.api_key[-4:] if len(self.api_key) > 8 else "***"
         logger.debug(f"Initialized OpenRouter client with key: {masked_key} (length: {len(self.api_key)})")
         
@@ -109,16 +107,14 @@ class DomainKnowledgeExtractor:
             request_id = str(uuid.uuid4())
             
         logger.info(f"Extracting domain knowledge (request_id: {request_id})")
-        
-        # Generate prompt for domain knowledge extraction
+
         prompt = self._generate_domain_prompt(data, target_column, problem_description)
         
         try:
-            # Query LLM for domain knowledge
+
             logger.info("Querying LLM for domain knowledge insights")
             response = self._query_llm_with_retry(prompt, request_id)
-            
-            # Parse and validate response
+
             insights = self._parse_insights(response)
             
             logger.info(f"Extracted {len(insights)} domain insights")
@@ -127,7 +123,7 @@ class DomainKnowledgeExtractor:
         except Exception as e:
             logger.error(f"Error extracting domain knowledge: {str(e)}")
             logger.error(traceback.format_exc())
-            # Return empty list in case of error
+
             return []
     
     def _generate_data_summary(self, data: pd.DataFrame, target_column: str) -> Dict[str, Any]:
@@ -153,15 +149,13 @@ class DomainKnowledgeExtractor:
         
         while retries < max_retries:
             try:
-                # Log the attempt
+
                 logger.info(f"Querying LLM (attempt {retries + 1}/{max_retries}, request_id: {request_id})")
-                
-                # Prepare the messages
+
                 messages = [
                     {"role": "user", "content": prompt}
                 ]
-                
-                # Make the API call
+
                 client = self._get_client()
                 
                 start_time = time.time()
@@ -174,16 +168,13 @@ class DomainKnowledgeExtractor:
                     response_format={"type": "json_object"},
                 )
                 end_time = time.time()
-                
-                # Log metrics
+
                 logger.info(f"LLM query duration: {end_time - start_time:.2f}s")
-                
-                # Process the response
+
                 response_content = response.choices[0].message.content
-                
-                # Try to parse JSON response
+
                 try:
-                    # First, try to find a JSON array in the string
+
                     import re
                     pattern = r'\[\s*{.*}\s*\]'
                     matches = re.search(pattern, response_content, re.DOTALL)
@@ -192,12 +183,11 @@ class DomainKnowledgeExtractor:
                         json_str = matches.group(0)
                         parsed_response = json.loads(json_str)
                     else:
-                        # If that fails, try parsing the entire response
+
                         parsed_response = json.loads(response_content)
-                        
-                        # Handle cases where the response is a dict with a key containing the array
+
                         if isinstance(parsed_response, dict):
-                            # Look for arrays in any of the dictionary values
+
                             for key, value in parsed_response.items():
                                 if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
                                     parsed_response = value
@@ -220,8 +210,7 @@ class DomainKnowledgeExtractor:
                 if retries >= max_retries:
                     logger.error(f"Maximum retries reached. Query failed: {str(e)}")
                     raise
-                
-                # Implement exponential backoff
+
                 sleep_time = backoff * (2 ** (retries - 1))
                 logger.info(f"Retrying in {sleep_time:.1f} seconds...")
                 time.sleep(sleep_time)
@@ -232,7 +221,7 @@ class DomainKnowledgeExtractor:
         data: pd.DataFrame,
     ) -> List[Dict[str, Any]]:
         """Refine initial insights through expert prompting."""
-        # Implementation details for insight refinement
+
         return initial_insights
     
     @staticmethod
@@ -249,11 +238,11 @@ class DomainKnowledgeExtractor:
             ValueError: If response cannot be parsed into valid insights
         """
         try:
-            # First try to parse as direct JSON
+
             try:
                 insights = json.loads(response)
                 if isinstance(insights, list):
-                    # Validate required fields
+
                     required_fields = ["feature_name", "importance", "relationships", 
                                      "suggested_transformations", "rationale"]
                     for insight in insights:
@@ -262,8 +251,7 @@ class DomainKnowledgeExtractor:
                     return insights
             except json.JSONDecodeError:
                 pass
-            
-            # If not direct JSON, try to extract JSON-like structure from text
+
             import re
             json_pattern = r'\{[^{}]*\}'
             matches = re.finditer(json_pattern, response)
@@ -280,8 +268,7 @@ class DomainKnowledgeExtractor:
             
             if not insights:
                 raise ValueError("No valid insights found in LLM response")
-            
-            # Validate and clean insights
+
             cleaned_insights = []
             for insight in insights:
                 cleaned_insight = {
@@ -383,11 +370,10 @@ class DomainKnowledgeExtractor:
         problem_description: str,
     ) -> str:
         """Generate prompt for domain knowledge extraction."""
-        # Get basic data stats
+
         sample_rows = min(5, len(data))
         data_sample = data.head(sample_rows).to_string()
-        
-        # Get column types and basic stats
+
         column_info = []
         for col in data.columns:
             dtype = data[col].dtype
@@ -421,12 +407,10 @@ class DomainKnowledgeExtractor:
             (f"stats: {info['stats']}" if not info['is_target'] else "(target column)")
             for info in column_info
         ])
-        
-        # Detect if this is an iris or titanic dataset
+
         is_iris_dataset = all(col in data.columns for col in ['sepal_width', 'petal_length', 'petal_width']) or 'species' in data.columns
         is_titanic_dataset = all(col in data.columns for col in ['Pclass', 'Sex', 'Age', 'Survived']) or 'Fare' in data.columns
-        
-        # Add specific domain knowledge for well-known datasets
+
         additional_context = ""
         if is_iris_dataset:
             additional_context = """
@@ -451,13 +435,10 @@ This appears to be the Titanic dataset, so consider these important domain insig
         return f"""You are a domain expert helping analyze a dataset for machine learning. 
 Your task is to provide domain knowledge that can guide feature engineering.
 
-## Dataset Information
 {data_sample}
 
-## Column Descriptions
 {column_descriptions}
 
-## Problem Description
 {problem_description}
 
 {additional_context}
@@ -498,19 +479,17 @@ Focus on the most important features first and provide at least 4-5 insights.
         
         for raw_insight in response:
             try:
-                # Validate and clean the raw insight
+
                 if not isinstance(raw_insight, dict):
                     logger.warning(f"Invalid insight format: {raw_insight}")
                     continue
-                    
-                # Ensure all required fields are present
+
                 required_fields = ["feature_name", "importance", "relationships", 
                                   "suggested_transformations", "rationale"]
                 if not all(field in raw_insight for field in required_fields):
                     logger.warning(f"Missing required fields in insight: {raw_insight}")
                     continue
-                    
-                # Create DomainInsight object
+
                 insight = DomainInsight(
                     feature_name=raw_insight["feature_name"],
                     importance=float(raw_insight["importance"]),
@@ -528,12 +507,10 @@ Focus on the most important features first and provide at least 4-5 insights.
     def _get_client(self):
         """Get or create an OpenAI client for API calls."""
         import openai
-        
-        # Check for an existing client
+
         if hasattr(self, "_openai_client") and self._openai_client is not None:
             return self._openai_client
-            
-        # Create a new client
+
         try:
             self._openai_client = openai.OpenAI(
                 base_url="https://openrouter.ai/api/v1",
@@ -570,15 +547,13 @@ Focus on the most important features first and provide at least 4-5 insights.
         Returns:
             List of domain insights
         """
-        # Identify target column (assume last column if not specified)
+
         target_column = column_names[-1] if column_names else None
-        
-        # Add domain context to problem description if provided
+
         enhanced_problem_description = problem_description
         if domain_context:
             enhanced_problem_description = f"{problem_description}\n\nAdditional domain context: {domain_context}"
-        
-        # Call the existing extract_knowledge method
+
         return self.extract_knowledge(
             data=data_sample,
             target_column=target_column,

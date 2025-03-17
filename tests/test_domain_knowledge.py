@@ -14,7 +14,6 @@ import logging
 
 from faster.domain_knowledge import DomainKnowledgeExtractor, DomainInsight, PromptConfig
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -25,22 +24,19 @@ def verify_openrouter_api_key() -> str:
     Returns:
         str: Validated API key or raises a pytest.skip exception
     """
-    # Check if API key exists in environment
+
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     
     if not api_key:
         pytest.skip("Skipping non-mock test: OPENROUTER_API_KEY environment variable not set")
-    
-    # Validate API key format
+
     if not api_key.startswith("sk-"):
         logger.warning("Warning: OpenRouter API key does not start with 'sk-'. Key may be invalid.")
-    
-    # Check for obvious placeholder values
+
     placeholder_terms = ["dummy", "test", "placeholder", "your_key", "example"]
     if any(term in api_key.lower() for term in placeholder_terms):
         pytest.skip(f"Skipping non-mock test: OPENROUTER_API_KEY appears to be a placeholder value")
-    
-    # Log (masked) key information for debugging
+
     masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
     logger.info(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
     
@@ -102,15 +98,13 @@ def mock_llm_response():
 @pytest.fixture
 def domain_extractor():
     """Create a DomainKnowledgeExtractor instance."""
-    # Try to use real API if available, otherwise use mock
+
     try:
-        # Verify and get API key
+
         api_key = verify_openrouter_api_key()
-        
-        # Configure OpenAI client
+
         client = configure_openai_client(api_key)
-        
-        # Test the client with a simple query to verify credentials work
+
         try:
             response = client.chat.completions.create(
                 model="deepseek/deepseek-chat:free",
@@ -119,8 +113,7 @@ def domain_extractor():
                 max_tokens=10
             )
             logger.info("OpenRouter API test successful")
-            
-            # Create extractor with the working client
+
             extractor = DomainKnowledgeExtractor(
                 model_name="deepseek/deepseek-chat:free",
                 temperature=0.0,
@@ -130,25 +123,24 @@ def domain_extractor():
             
         except Exception as e:
             logger.error(f"OpenRouter API test failed: {str(e)}")
-            # Fall back to mock if API test fails
+
     except Exception:
-        # Fall back to mock if API key verification fails
+
         pass
-    
-    # Use mock if real API is not available
+
     with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'dummy_key'}):
-        # Use a mock to avoid actual API calls
+
         with patch('openai.OpenAI') as mock_openai:
-            # Create a mock client with appropriate attributes
+
             mock_client = Mock()
-            # Set api_key to a string to avoid TypeError in _query_llm_with_retry
+
             mock_client.api_key = ""
-            # Set base_url to a string to avoid attribute errors
+
             mock_client.base_url = "https://openrouter.ai/api/v1"
             mock_openai.return_value = mock_client
             
             extractor = DomainKnowledgeExtractor()
-            # Replace the client to avoid actual API calls
+
             extractor.client = mock_client
             return extractor
 
@@ -187,12 +179,12 @@ def test_parse_llm_response_missing_fields(domain_extractor):
     invalid_json = json.dumps([{
         "feature_name": "test",
         "importance": 0.5
-        # Missing relationships, suggested_transformations, and rationale
+
     }])
     
     with pytest.raises(ValueError, match="Missing required fields"):
         insights = domain_extractor._parse_llm_response(invalid_json)
-        # The validation should fail before we get here
+
         pytest.fail("Expected ValueError but no exception was raised")
 
 def test_generate_data_summary(domain_extractor, sample_data):
@@ -207,7 +199,7 @@ def test_generate_data_summary(domain_extractor, sample_data):
 @patch('openai.OpenAI')
 def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_response):
     """Test successful LLM query with retry."""
-    # Create a proper mock response
+
     mock_message = ChatCompletionMessage(
         content=mock_llm_response,
         role="assistant"
@@ -223,22 +215,18 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
         model="test-model",
         object="chat.completion"
     )
-    
-    # Configure the mock client
+
     mock_client = Mock()
     mock_client.chat.completions.create.return_value = mock_completion
     mock_openai.return_value = mock_client
-    
-    # Replace the client in domain_extractor
+
     domain_extractor.client = mock_client
-    
-    # Add a request_id parameter
+
     request_id = "test-request-id"
     insights = domain_extractor._query_llm_with_retry("test prompt", request_id)
     assert len(insights) == 2
     assert mock_client.chat.completions.create.call_count == 1
-    
-    # Verify correct API call including expected headers
+
     mock_client.chat.completions.create.assert_called_with(
         model="deepseek/deepseek-chat:free",
         messages=[{"role": "user", "content": "test prompt"}],
@@ -251,7 +239,7 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
 @patch('openai.OpenAI')
 def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
     """Test LLM query with retry on failure."""
-    # Configure mock to raise authentication error
+
     mock_client = Mock()
     mock_client.chat.completions.create.side_effect = [
         httpx.HTTPStatusError(
@@ -263,8 +251,7 @@ def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
     
     mock_openai.return_value = mock_client
     domain_extractor.client = mock_client
-    
-    # Add a request_id parameter
+
     request_id = "test-request-id"
     with pytest.raises(httpx.HTTPStatusError, match="401 Unauthorized"):
         domain_extractor._query_llm_with_retry("test prompt", request_id)
@@ -273,7 +260,7 @@ def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
 @patch('faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry')
 def test_extract_knowledge_integration(mock_query, domain_extractor):
     """Test full knowledge extraction pipeline."""
-    # Create larger sample data
+
     data = pd.DataFrame({
         'numeric_feature': range(20),
         'categorical_feature': ['A', 'B'] * 10,
