@@ -9,7 +9,9 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 import warnings
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -20,37 +22,44 @@ def load_iris_dataset() -> Tuple[pd.DataFrame, pd.Series]:
 
     feature_names = iris.feature_names
     df = pd.DataFrame(iris.data, columns=feature_names)
-    df['species'] = iris.target
+    df["species"] = iris.target
 
-    species_mapping = {0: 'setosa', 1: 'versicolor', 2: 'virginica'}
-    df['species'] = df['species'].map(species_mapping)
+    species_mapping = {0: "setosa", 1: "versicolor", 2: "virginica"}
+    df["species"] = df["species"].map(species_mapping)
 
     column_mapping = {
-        'sepal length (cm)': 'sepal_length',
-        'sepal width (cm)': 'sepal_width',
-        'petal length (cm)': 'petal_length',
-        'petal width (cm)': 'petal_width'
+        "sepal length (cm)": "sepal_length",
+        "sepal width (cm)": "sepal_width",
+        "petal length (cm)": "petal_length",
+        "petal width (cm)": "petal_width",
     }
     df = df.rename(columns=column_mapping)
 
-    X = df[['sepal_width', 'petal_length', 'petal_width', 'species']].copy()
-    y = df['sepal_length']
+    X = df[["sepal_width", "petal_length", "petal_width", "species"]].copy()
+    y = df["sepal_length"]
 
     data = X.copy()
-    data['sepal_length'] = y
-    
+    data["sepal_length"] = y
+
     return data, y
 
 
 def load_auto_mpg_dataset() -> Tuple[pd.DataFrame, pd.Series]:
     """Load and preprocess the Auto MPG dataset for regression (predicting MPG)."""
     try:
-
         url = "https://archive.ics.uci.edu/ml/machine-learning-databases/auto-mpg/auto-mpg.data"
-        column_names = ['mpg', 'cylinders', 'displacement', 'horsepower', 
-                        'weight', 'acceleration', 'model_year', 'origin', 'car_name']
-        df = pd.read_csv(url, delim_whitespace=True, header=None, 
-                        names=column_names, na_values='?')
+        column_names = [
+            "mpg",
+            "cylinders",
+            "displacement",
+            "horsepower",
+            "weight",
+            "acceleration",
+            "model_year",
+            "origin",
+            "car_name",
+        ]
+        df = pd.read_csv(url, delim_whitespace=True, header=None, names=column_names, na_values="?")
     except Exception as e:
         logger.warning(f"Error fetching from UCI: {str(e)}. Using local data...")
 
@@ -62,42 +71,43 @@ def load_auto_mpg_dataset() -> Tuple[pd.DataFrame, pd.Series]:
         acceleration = np.random.normal(15, 3, 100)
         model_year = np.random.randint(70, 83, 100)
         origin = np.random.choice([1, 2, 3], 100)
-        
-        df = pd.DataFrame({
-            'mpg': mpg,
-            'cylinders': cylinders,
-            'displacement': displacement,
-            'horsepower': horsepower,
-            'weight': weight,
-            'acceleration': acceleration,
-            'model_year': model_year,
-            'origin': origin
-        })
 
-    if 'car_name' in df.columns:
-        df = df.drop('car_name', axis=1)
+        df = pd.DataFrame(
+            {
+                "mpg": mpg,
+                "cylinders": cylinders,
+                "displacement": displacement,
+                "horsepower": horsepower,
+                "weight": weight,
+                "acceleration": acceleration,
+                "model_year": model_year,
+                "origin": origin,
+            }
+        )
 
-    numeric_columns = ['horsepower']  # Typically only horsepower has missing values
-    imputer = SimpleImputer(strategy='median')
+    if "car_name" in df.columns:
+        df = df.drop("car_name", axis=1)
+
+    numeric_columns = ["horsepower"]  # Typically only horsepower has missing values
+    imputer = SimpleImputer(strategy="median")
     df[numeric_columns] = imputer.fit_transform(df[numeric_columns])
 
-    origin_mapping = {1: 'american', 2: 'european', 3: 'asian'}
-    df['origin'] = df['origin'].map(origin_mapping)
+    origin_mapping = {1: "american", 2: "european", 3: "asian"}
+    df["origin"] = df["origin"].map(origin_mapping)
 
-    y = df['mpg']
-    X = df.drop('mpg', axis=1)
+    y = df["mpg"]
+    X = df.drop("mpg", axis=1)
 
     data = X.copy()
-    data['mpg'] = y
-    
+    data["mpg"] = y
+
     return data, y
 
 
 def load_titanic_dataset() -> Tuple[pd.DataFrame, pd.Series]:
     """Load and preprocess the Titanic dataset for classification (predicting survival)."""
     try:
-
-        url = 'https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv'
+        url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
         df = pd.read_csv(url)
     except Exception as e:
         logger.warning(f"Error fetching Titanic dataset: {str(e)}. Using mock data...")
@@ -105,74 +115,80 @@ def load_titanic_dataset() -> Tuple[pd.DataFrame, pd.Series]:
         n_samples = 100
         survived = np.random.choice([0, 1], n_samples)
         pclass = np.random.choice([1, 2, 3], n_samples)
-        sex = np.random.choice(['male', 'female'], n_samples)
+        sex = np.random.choice(["male", "female"], n_samples)
         age = np.random.normal(30, 15, n_samples)
         sibsp = np.random.choice(range(0, 5), n_samples)
         parch = np.random.choice(range(0, 4), n_samples)
         fare = np.random.normal(30, 20, n_samples)
-        embarked = np.random.choice(['C', 'Q', 'S'], n_samples)
-        
-        df = pd.DataFrame({
-            'Survived': survived,
-            'Pclass': pclass,
-            'Sex': sex,
-            'Age': age,
-            'SibSp': sibsp,
-            'Parch': parch,
-            'Fare': fare,
-            'Embarked': embarked
-        })
+        embarked = np.random.choice(["C", "Q", "S"], n_samples)
 
-    features = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked']
-    df = df[['Survived'] + features]
+        df = pd.DataFrame(
+            {
+                "Survived": survived,
+                "Pclass": pclass,
+                "Sex": sex,
+                "Age": age,
+                "SibSp": sibsp,
+                "Parch": parch,
+                "Fare": fare,
+                "Embarked": embarked,
+            }
+        )
 
-    numeric_features = ['Age', 'Fare']
-    categorical_features = ['Sex', 'Embarked']
+    features = ["Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"]
+    df = df[["Survived"] + features]
 
-    numeric_imputer = SimpleImputer(strategy='median')
+    numeric_features = ["Age", "Fare"]
+    categorical_features = ["Sex", "Embarked"]
+
+    numeric_imputer = SimpleImputer(strategy="median")
     df[numeric_features] = numeric_imputer.fit_transform(df[numeric_features])
 
-    categorical_imputer = SimpleImputer(strategy='most_frequent')
+    categorical_imputer = SimpleImputer(strategy="most_frequent")
     df[categorical_features] = categorical_imputer.fit_transform(df[categorical_features])
 
-    y = df['Survived']
-    X = df.drop('Survived', axis=1)
+    y = df["Survived"]
+    X = df.drop("Survived", axis=1)
 
     data = X.copy()
-    data['Survived'] = y
-    
+    data["Survived"] = y
+
     return data, y
 
 
 def load_horsepower_mpg_dataset() -> Tuple[pd.DataFrame, pd.Series]:
     """Load and preprocess the Horsepower-MPG dataset (simplified Auto MPG with only horsepower)."""
     try:
-
         url = "https://archive.ics.uci.edu/ml/machine-learning-databases/auto-mpg/auto-mpg.data"
-        column_names = ['mpg', 'cylinders', 'displacement', 'horsepower', 
-                        'weight', 'acceleration', 'model_year', 'origin', 'car_name']
-        df = pd.read_csv(url, delim_whitespace=True, header=None, 
-                        names=column_names, na_values='?')
+        column_names = [
+            "mpg",
+            "cylinders",
+            "displacement",
+            "horsepower",
+            "weight",
+            "acceleration",
+            "model_year",
+            "origin",
+            "car_name",
+        ]
+        df = pd.read_csv(url, delim_whitespace=True, header=None, names=column_names, na_values="?")
     except Exception as e:
         logger.warning(f"Error fetching from UCI: {str(e)}. Using local data...")
 
         mpg = np.random.normal(20, 5, 100)
         horsepower = np.random.normal(100, 30, 100)
-        
-        df = pd.DataFrame({
-            'mpg': mpg,
-            'horsepower': horsepower
-        })
 
-    df = df[['mpg', 'horsepower']]
+        df = pd.DataFrame({"mpg": mpg, "horsepower": horsepower})
 
-    imputer = SimpleImputer(strategy='median')
-    df['horsepower'] = imputer.fit_transform(df[['horsepower']])
+    df = df[["mpg", "horsepower"]]
 
-    y = df['mpg']
-    X = df[['horsepower']]
+    imputer = SimpleImputer(strategy="median")
+    df["horsepower"] = imputer.fit_transform(df[["horsepower"]])
+
+    y = df["mpg"]
+    X = df[["horsepower"]]
 
     data = X.copy()
-    data['mpg'] = y
-    
-    return data, y 
+    data["mpg"] = y
+
+    return data, y

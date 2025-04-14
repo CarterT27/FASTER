@@ -19,7 +19,9 @@ from faster.feature_selection import SelectionCriteria
 from faster.domain_knowledge import DomainKnowledgeExtractor
 from tests.conftest import colored_metric_output
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 MOCK_LLM_RESPONSE = [
@@ -28,54 +30,57 @@ MOCK_LLM_RESPONSE = [
         "importance": 0.9,
         "relationships": ["Age", "Pclass"],
         "suggested_transformations": ["one_hot", "label"],
-        "rationale": "Gender was a primary factor in survival due to 'women and children first' policy"
+        "rationale": "Gender was a primary factor in survival due to 'women and children first' policy",
     },
     {
         "feature_name": "Age",
         "importance": 0.8,
         "relationships": ["Sex", "Pclass"],
         "suggested_transformations": ["log", "zscore", "binning"],
-        "rationale": "Age affected survival chances with children having priority"
+        "rationale": "Age affected survival chances with children having priority",
     },
     {
         "feature_name": "Pclass",
         "importance": 0.7,
         "relationships": ["Fare"],
         "suggested_transformations": ["one_hot", "ordinal"],
-        "rationale": "Passenger class correlated with survival due to cabin location and access to lifeboats"
+        "rationale": "Passenger class correlated with survival due to cabin location and access to lifeboats",
     },
     {
         "feature_name": "Fare",
         "importance": 0.6,
         "relationships": ["Pclass"],
         "suggested_transformations": ["log", "zscore"],
-        "rationale": "Ticket fare indicates passenger class and potentially better access to survival"
+        "rationale": "Ticket fare indicates passenger class and potentially better access to survival",
     },
     {
         "feature_name": "SibSp",
         "importance": 0.5,
         "relationships": ["Parch"],
         "suggested_transformations": ["zscore", "interaction"],
-        "rationale": "Family size affected survival chances"
-    }
+        "rationale": "Family size affected survival chances",
+    },
 ]
+
 
 def load_and_preprocess_titanic() -> Tuple[pd.DataFrame, pd.Series]:
     """Load and preprocess the Titanic dataset."""
 
-    titanic = pd.read_csv('https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv')
+    titanic = pd.read_csv(
+        "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
+    )
 
-    features = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked']
+    features = ["Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"]
     X = titanic[features].copy()
-    y = titanic['Survived']
+    y = titanic["Survived"]
 
-    numeric_features = ['Age', 'Fare']
-    categorical_features = ['Sex', 'Embarked']
+    numeric_features = ["Age", "Fare"]
+    categorical_features = ["Sex", "Embarked"]
 
-    numeric_imputer = SimpleImputer(strategy='median')
+    numeric_imputer = SimpleImputer(strategy="median")
     X[numeric_features] = numeric_imputer.fit_transform(X[numeric_features])
 
-    categorical_imputer = SimpleImputer(strategy='most_frequent')
+    categorical_imputer = SimpleImputer(strategy="most_frequent")
     X[categorical_features] = categorical_imputer.fit_transform(X[categorical_features])
 
     for feature in categorical_features:
@@ -84,49 +89,40 @@ def load_and_preprocess_titanic() -> Tuple[pd.DataFrame, pd.Series]:
 
     scaler = StandardScaler()
     X[numeric_features] = scaler.fit_transform(X[numeric_features])
-    
+
     return X, y
+
 
 def evaluate_model(X: pd.DataFrame, y: pd.Series) -> Dict[str, float]:
     """Evaluate model using cross-validation."""
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
 
-    scoring = {
-        'accuracy': 'accuracy',
-        'f1': 'f1',
-        'roc_auc': 'roc_auc'
-    }
+    scoring = {"accuracy": "accuracy", "f1": "f1", "roc_auc": "roc_auc"}
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        cv_results = cross_validate(
-            clf, X, y,
-            cv=5,
-            scoring=scoring,
-            return_train_score=True
-        )
+        cv_results = cross_validate(clf, X, y, cv=5, scoring=scoring, return_train_score=True)
 
     return {
-
-        'test_accuracy': cv_results['test_accuracy'].mean(),
-        'test_f1': cv_results['test_f1'].mean(),
-        'test_roc_auc': cv_results['test_roc_auc'].mean(),
-
-        'train_accuracy': cv_results['train_accuracy'].mean(),
-        'train_f1': cv_results['train_f1'].mean(),
-        'train_roc_auc': cv_results['train_roc_auc'].mean()
+        "test_accuracy": cv_results["test_accuracy"].mean(),
+        "test_f1": cv_results["test_f1"].mean(),
+        "test_roc_auc": cv_results["test_roc_auc"].mean(),
+        "train_accuracy": cv_results["train_accuracy"].mean(),
+        "train_f1": cv_results["train_f1"].mean(),
+        "train_roc_auc": cv_results["train_roc_auc"].mean(),
     }
+
 
 def verify_openrouter_api_key() -> str:
     """
     Verify and retrieve the OpenRouter API key.
-    
+
     Returns:
         str: Validated API key or raises a pytest.skip exception
     """
 
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    
+
     if not api_key:
         pytest.skip("Skipping non-mock test: OPENROUTER_API_KEY environment variable not set")
 
@@ -139,26 +135,28 @@ def verify_openrouter_api_key() -> str:
 
     masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
     logger.info(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
-    
+
     return api_key
+
 
 def configure_openai_client(api_key: str) -> openai.OpenAI:
     """
     Configure and return an OpenAI client configured for OpenRouter.
-    
+
     Args:
         api_key: The OpenRouter API key
-        
+
     Returns:
         openai.OpenAI: Configured client
     """
-    
+
     logger.info(f"Configuring OpenAI client with base URL: https://openrouter.ai/api/v1")
-    
+
     return openai.OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
     )
+
 
 @pytest.mark.parametrize("use_mock", [True, False])
 def test_titanic_integration(use_mock):
@@ -166,7 +164,6 @@ def test_titanic_integration(use_mock):
 
     if not use_mock:
         try:
-
             api_key = verify_openrouter_api_key()
 
             client = configure_openai_client(api_key)
@@ -176,20 +173,20 @@ def test_titanic_integration(use_mock):
                     model="deepseek/deepseek-chat:free",
                     messages=[{"role": "user", "content": "Hello, this is a test"}],
                     temperature=0.0,
-                    max_tokens=10
+                    max_tokens=10,
                 )
                 logger.info("OpenRouter API test successful")
             except Exception as e:
                 logger.error(f"OpenRouter API test failed: {str(e)}")
                 pytest.skip(f"Skipping non-mock test: OpenRouter API request failed: {str(e)}")
-                
+
         except Exception as e:
             logger.error(f"Error setting up OpenRouter credentials: {str(e)}")
             pytest.skip(f"Skipping non-mock test: {str(e)}")
 
     X, y = load_and_preprocess_titanic()
     data = X.copy()
-    data['Survived'] = y
+    data["Survived"] = y
 
     baseline_scores = evaluate_model(X, y)
 
@@ -203,28 +200,28 @@ def test_titanic_integration(use_mock):
         selection_criteria=SelectionCriteria(),
         output_dir=None,
         save_intermediate=False,
-        keep_all_features=True  # Keep all features without dropping any
+        keep_all_features=True,  # Keep all features without dropping any
     )
 
     if use_mock:
-
-        with patch('faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry') as mock_query:
-
+        with patch(
+            "faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry"
+        ) as mock_query:
             mock_query.return_value = MOCK_LLM_RESPONSE
 
             pipeline_no_domain = Pipeline(config)
             result_no_domain = pipeline_no_domain.run(
                 data=data,
-                target_column='Survived',
+                target_column="Survived",
                 problem_description="Binary classification problem predicting survival",
                 is_classification=True,
-                keep_all_features=True  # Keep all features without dropping any
+                keep_all_features=True,  # Keep all features without dropping any
             )
-            
+
             pipeline_with_domain = Pipeline(config)
             result_with_domain = pipeline_with_domain.run(
                 data=data,
-                target_column='Survived',
+                target_column="Survived",
                 problem_description="""
                 Binary classification problem predicting passenger survival on the Titanic.
                 Features:
@@ -244,31 +241,28 @@ def test_titanic_integration(use_mock):
                 - Port of embarkation could indicate passenger's social status
                 """,
                 is_classification=True,
-                keep_all_features=True  # Keep all features without dropping any
+                keep_all_features=True,  # Keep all features without dropping any
             )
     else:
-
         domain_extractor = DomainKnowledgeExtractor(
-            model_name=config.model_name,
-            temperature=config.temperature,
-            api_key=api_key
+            model_name=config.model_name, temperature=config.temperature, api_key=api_key
         )
 
         pipeline_no_domain = Pipeline(config)
         pipeline_no_domain.domain_extractor = domain_extractor
         result_no_domain = pipeline_no_domain.run(
             data=data,
-            target_column='Survived',
+            target_column="Survived",
             problem_description="Binary classification problem predicting survival",
             is_classification=True,
-            keep_all_features=True  # Keep all features without dropping any
+            keep_all_features=True,  # Keep all features without dropping any
         )
-        
+
         pipeline_with_domain = Pipeline(config)
         pipeline_with_domain.domain_extractor = domain_extractor
         result_with_domain = pipeline_with_domain.run(
             data=data,
-            target_column='Survived',
+            target_column="Survived",
             problem_description="""
             Binary classification problem predicting passenger survival on the Titanic.
             Features:
@@ -288,7 +282,7 @@ def test_titanic_integration(use_mock):
             - Port of embarkation could indicate passenger's social status
             """,
             is_classification=True,
-            keep_all_features=True  # Keep all features without dropping any
+            keep_all_features=True,  # Keep all features without dropping any
         )
 
     print("\nAvailable attributes in result_no_domain:", dir(result_no_domain))
@@ -296,10 +290,10 @@ def test_titanic_integration(use_mock):
     no_domain_features = result_no_domain.transformed_data
     with_domain_features = result_with_domain.transformed_data
 
-    if 'Survived' in no_domain_features.columns:
-        no_domain_features = no_domain_features.drop('Survived', axis=1)
-    if 'Survived' in with_domain_features.columns:
-        with_domain_features = with_domain_features.drop('Survived', axis=1)
+    if "Survived" in no_domain_features.columns:
+        no_domain_features = no_domain_features.drop("Survived", axis=1)
+    if "Survived" in with_domain_features.columns:
+        with_domain_features = with_domain_features.drop("Survived", axis=1)
 
     print("\nNo Domain Features Shape:", no_domain_features.shape)
     print("With Domain Features Shape:", with_domain_features.shape)
@@ -310,47 +304,49 @@ def test_titanic_integration(use_mock):
     print("\nFASTER (With Domain Knowledge) X Columns:")
     print(sorted(with_domain_features.columns.tolist()))
 
-    faster_no_domain_scores = evaluate_model(
-        no_domain_features,
-        y
-    )
-    
-    faster_with_domain_scores = evaluate_model(
-        with_domain_features,
-        y
-    )
+    faster_no_domain_scores = evaluate_model(no_domain_features, y)
+
+    faster_with_domain_scores = evaluate_model(with_domain_features, y)
 
     print(f"\nModel Performance Comparison ({'Mock' if use_mock else 'Real'} LLM):")
-    
+
     print("\nBaseline Model:")
     print("  Train Metrics:")
-    for metric, score in [(k, v) for k, v in baseline_scores.items() if k.startswith('train')]:
+    for metric, score in [(k, v) for k, v in baseline_scores.items() if k.startswith("train")]:
         print(f"    {metric.replace('train_', '')}: {score:.4f}")
     print("  Test Metrics:")
-    for metric, score in [(k, v) for k, v in baseline_scores.items() if k.startswith('test')]:
+    for metric, score in [(k, v) for k, v in baseline_scores.items() if k.startswith("test")]:
         print(f"    {metric.replace('test_', '')}: {score:.4f}")
-    
+
     print("\nFASTER (No Domain Knowledge):")
     print("  Train Metrics:")
-    for metric, score in [(k, v) for k, v in faster_no_domain_scores.items() if k.startswith('train')]:
-        metric_name = metric.replace('train_', '')
+    for metric, score in [
+        (k, v) for k, v in faster_no_domain_scores.items() if k.startswith("train")
+    ]:
+        metric_name = metric.replace("train_", "")
         baseline_score = baseline_scores[metric]
         print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
     print("  Test Metrics:")
-    for metric, score in [(k, v) for k, v in faster_no_domain_scores.items() if k.startswith('test')]:
-        metric_name = metric.replace('test_', '')
+    for metric, score in [
+        (k, v) for k, v in faster_no_domain_scores.items() if k.startswith("test")
+    ]:
+        metric_name = metric.replace("test_", "")
         baseline_score = baseline_scores[metric]
         print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
-    
+
     print("\nFASTER (With Domain Knowledge):")
     print("  Train Metrics:")
-    for metric, score in [(k, v) for k, v in faster_with_domain_scores.items() if k.startswith('train')]:
-        metric_name = metric.replace('train_', '')
+    for metric, score in [
+        (k, v) for k, v in faster_with_domain_scores.items() if k.startswith("train")
+    ]:
+        metric_name = metric.replace("train_", "")
         baseline_score = baseline_scores[metric]
         print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
     print("  Test Metrics:")
-    for metric, score in [(k, v) for k, v in faster_with_domain_scores.items() if k.startswith('test')]:
-        metric_name = metric.replace('test_', '')
+    for metric, score in [
+        (k, v) for k, v in faster_with_domain_scores.items() if k.startswith("test")
+    ]:
+        metric_name = metric.replace("test_", "")
         baseline_score = baseline_scores[metric]
         print(f"    {colored_metric_output(metric_name, score, baseline_score)}")
 
@@ -364,11 +360,11 @@ def test_titanic_integration(use_mock):
     assert result_with_domain.selected_features is not None
     assert len(result_no_domain.selected_features) > 0
     assert len(result_with_domain.selected_features) > 0
-    
+
     all_scores = {
-        'baseline': baseline_scores,
-        'faster_no_domain': faster_no_domain_scores,
-        'faster_with_domain': faster_with_domain_scores
+        "baseline": baseline_scores,
+        "faster_no_domain": faster_no_domain_scores,
+        "faster_with_domain": faster_with_domain_scores,
     }
-    
+
     print("\nAll performance metrics:", all_scores)

@@ -18,10 +18,11 @@ from faster.statistical_evaluation import FeatureStatistics
 
 logger = get_logger(__name__)
 
+
 @dataclass
 class SelectionCriteria:
     """Criteria for feature selection."""
-    
+
     p_value_threshold: float = 0.2  # Increased from 0.1 to be much less strict
     min_effect_size: float = 0.01  # Decreased from 0.05 to be less strict
     max_correlation: float = 0.95  # Increased from 0.9 to allow more correlated features
@@ -33,32 +34,34 @@ class SelectionCriteria:
     stability_threshold: float = 0.5  # Decreased from 0.6 to be less strict
     keep_all_features: bool = False  # Option to bypass feature dropping functionality
 
+
 @dataclass
 class SelectionResult:
     """Results of feature selection process."""
-    
+
     selected_features: List[str]
     selection_scores: Dict[str, float]
     removed_features: Dict[str, str]  # feature -> reason for removal
     statistics: Dict[str, FeatureStatistics]
 
+
 class FeatureSelector:
     """Selects optimal feature subset based on statistical and ML criteria."""
-    
+
     def __init__(
         self,
         criteria: Optional[SelectionCriteria] = None,
         random_state: int = 42,
     ):
         """Initialize the feature selector.
-        
+
         Args:
             criteria: Selection criteria configuration
             random_state: Random state for reproducibility
         """
         self.criteria = criteria or SelectionCriteria()
         self.random_state = random_state
-    
+
     def select_features(
         self,
         data: pd.DataFrame,
@@ -67,20 +70,19 @@ class FeatureSelector:
         is_classification: bool = True,
     ) -> SelectionResult:
         """Select optimal feature subset.
-        
+
         Args:
             data: Input DataFrame
             target_column: Name of target variable
             feature_stats: Statistical metrics for features
             is_classification: Whether this is a classification task
-            
+
         Returns:
             Selection results including selected features and metadata
         """
         logger.info("Starting feature selection process")
-        
-        try:
 
+        try:
             candidates = set(data.columns) - {target_column}
             if not candidates:
                 logger.warning("No features available for selection")
@@ -106,19 +108,19 @@ class FeatureSelector:
                         logger.warning(f"Failed to calculate importance scores: {e}")
 
                         importance_scores = {feature: 1.0 for feature in candidates}
-                
+
                 return SelectionResult(
                     selected_features=list(candidates),
                     selection_scores=importance_scores,
                     removed_features={},
                     statistics={stat.feature_name: stat for stat in feature_stats},
                 )
-                
+
             removed = {}
             stats_dict = {stat.feature_name: stat for stat in feature_stats}
 
             candidates = self._filter_by_statistics(candidates, stats_dict, removed)
-            
+
             if not candidates:
                 logger.warning("No features passed statistical criteria")
                 return SelectionResult(
@@ -129,7 +131,7 @@ class FeatureSelector:
                 )
 
             candidates = self._filter_correlations(data[list(candidates)], candidates, removed)
-            
+
             if not candidates:
                 logger.warning("No features passed correlation filtering")
                 return SelectionResult(
@@ -140,7 +142,7 @@ class FeatureSelector:
                 )
 
             candidates = self._check_multicollinearity(data[list(candidates)], candidates, removed)
-            
+
             if not candidates:
                 logger.warning("No features passed multicollinearity check")
                 return SelectionResult(
@@ -158,30 +160,29 @@ class FeatureSelector:
 
             if len(final_features) > 1:
                 stable_features = self._stability_selection(
-                    data[final_features],
-                    data[target_column],
-                    is_classification
+                    data[final_features], data[target_column], is_classification
                 )
 
                 if stable_features and len(stable_features) < len(final_features):
-
                     for feature in final_features:
                         if feature not in stable_features:
-                            removed[feature] = f"Failed stability selection (inconsistent importance)"
+                            removed[feature] = (
+                                f"Failed stability selection (inconsistent importance)"
+                            )
 
                     final_features = stable_features
-            
+
             return SelectionResult(
                 selected_features=final_features,
                 selection_scores=importance_scores,
                 removed_features=removed,
                 statistics=stats_dict,
             )
-            
+
         except Exception as e:
             logger.error(f"Error in feature selection: {str(e)}", exc_info=True)
             raise
-    
+
     def _filter_by_statistics(
         self,
         candidates: Set[str],
@@ -190,29 +191,35 @@ class FeatureSelector:
     ) -> Set[str]:
         """Filter features based on statistical criteria."""
         result = candidates.copy()
-        
+
         for feature in candidates:
             if feature not in stats:
                 continue
-                
+
             stat = stats[feature]
 
             if stat.p_value > self.criteria.p_value_threshold:
-                removed[feature] = f"p-value ({stat.p_value:.4f}) > threshold ({self.criteria.p_value_threshold})"
+                removed[feature] = (
+                    f"p-value ({stat.p_value:.4f}) > threshold ({self.criteria.p_value_threshold})"
+                )
                 result.remove(feature)
                 continue
 
             if stat.effect_size < self.criteria.min_effect_size:
-                removed[feature] = f"effect size ({stat.effect_size:.4f}) < threshold ({self.criteria.min_effect_size})"
+                removed[feature] = (
+                    f"effect size ({stat.effect_size:.4f}) < threshold ({self.criteria.min_effect_size})"
+                )
                 result.remove(feature)
                 continue
 
             if stat.mutual_information < self.criteria.min_mutual_info:
-                removed[feature] = f"mutual information ({stat.mutual_information:.4f}) < threshold ({self.criteria.min_mutual_info})"
+                removed[feature] = (
+                    f"mutual information ({stat.mutual_information:.4f}) < threshold ({self.criteria.min_mutual_info})"
+                )
                 result.remove(feature)
-        
+
         return result
-    
+
     def _filter_correlations(
         self,
         data: pd.DataFrame,
@@ -221,38 +228,41 @@ class FeatureSelector:
     ) -> Set[str]:
         """
         Filter out highly correlated features.
-        
+
         Args:
             data (DataFrame): Input dataframe
             candidates (Set[str]): Set of candidate feature names
             removed (Dict[str, str]): Dict to track removed features and reasons
-            
+
         Returns:
             Set[str]: Filtered set of feature names
         """
         if len(candidates) <= 1:
             return candidates
 
-
         numeric_data = pd.DataFrame()
         categorical_columns = []
-        
+
         for col in candidates:
             if col not in data.columns:
                 continue
-                
+
             col_data = data[col]
 
-            if pd.api.types.is_categorical_dtype(col_data) or pd.api.types.is_object_dtype(col_data):
+            if pd.api.types.is_categorical_dtype(col_data) or pd.api.types.is_object_dtype(
+                col_data
+            ):
                 categorical_columns.append(col)
 
                 continue
 
             if not pd.api.types.is_numeric_dtype(col_data):
-                self.logger.warning(f"Column {col} is not numeric and will be excluded from correlation analysis")
+                self.logger.warning(
+                    f"Column {col} is not numeric and will be excluded from correlation analysis"
+                )
                 categorical_columns.append(col)
                 continue
-                
+
             numeric_data[col] = col_data
 
         if numeric_data.empty or len(numeric_data.columns) <= 1:
@@ -260,9 +270,11 @@ class FeatureSelector:
             return candidates
 
         try:
-            corr_matrix = numeric_data.corr(method='pearson')
+            corr_matrix = numeric_data.corr(method="pearson")
         except Exception as e:
-            self.logger.warning(f"Could not compute correlation matrix: {str(e)}. Skipping correlation filtering.")
+            self.logger.warning(
+                f"Could not compute correlation matrix: {str(e)}. Skipping correlation filtering."
+            )
             return candidates
 
         avg_corr = corr_matrix.mean().sort_values(ascending=False)
@@ -270,50 +282,54 @@ class FeatureSelector:
         for feature in avg_corr.index:
             if feature not in candidates:
                 continue
-                
-            correlated_features = []
-            
-            for other_feature in avg_corr.index:
-                if feature != other_feature and other_feature in candidates and corr_matrix.loc[feature, other_feature] > self.criteria.max_correlation:
-                    correlated_features.append(other_feature)
-            
-            if correlated_features:
 
+            correlated_features = []
+
+            for other_feature in avg_corr.index:
+                if (
+                    feature != other_feature
+                    and other_feature in candidates
+                    and corr_matrix.loc[feature, other_feature] > self.criteria.max_correlation
+                ):
+                    correlated_features.append(other_feature)
+
+            if correlated_features:
                 keep_feature = feature
                 for corr_feature in correlated_features:
                     try:
-
-                        if (feature in numeric_data.columns and 
-                            corr_feature in numeric_data.columns):
-                            var_ratio = numeric_data[corr_feature].var() / numeric_data[feature].var()
+                        if feature in numeric_data.columns and corr_feature in numeric_data.columns:
+                            var_ratio = (
+                                numeric_data[corr_feature].var() / numeric_data[feature].var()
+                            )
                             if var_ratio > 1.5:  # Significantly higher variance
                                 keep_feature = corr_feature
                                 break
                     except Exception as e:
-                        self.logger.warning(f"Error computing variance ratio for {feature} and {corr_feature}: {str(e)}")
-
+                        self.logger.warning(
+                            f"Error computing variance ratio for {feature} and {corr_feature}: {str(e)}"
+                        )
 
                 for f in correlated_features + [feature]:
                     if f != keep_feature and f in candidates:
-                        corr_value = corr_matrix.loc[f, keep_feature] if f in corr_matrix.index and keep_feature in corr_matrix.columns else float('nan')
+                        corr_value = (
+                            corr_matrix.loc[f, keep_feature]
+                            if f in corr_matrix.index and keep_feature in corr_matrix.columns
+                            else float("nan")
+                        )
                         removed[f] = f"high correlation with {keep_feature} ({corr_value:.4f})"
                         candidates.remove(f)
 
         candidates = candidates.union(set(categorical_columns).intersection(set(data.columns)))
-        
+
         return candidates
-    
+
     def _check_multicollinearity(
-        self, 
-        data: pd.DataFrame,
-        candidates: Set[str],
-        removed: Dict[str, str]
+        self, data: pd.DataFrame, candidates: Set[str], removed: Dict[str, str]
     ) -> Set[str]:
         """Check for multicollinearity using Variance Inflation Factor (VIF)."""
         result = candidates.copy()
-        
-        try:
 
+        try:
             if len(data.columns) < 2 or len(data) <= len(data.columns):
                 return result
 
@@ -326,11 +342,13 @@ class FeatureSelector:
             while True:
                 if len(X.columns) < 2:
                     break
-                    
+
                 vifs = {}
                 for i, col in enumerate(X.columns):
                     try:
-                        vifs[col] = variance_inflation_factor(X_with_const.values, i + 1)  # +1 for constant
+                        vifs[col] = variance_inflation_factor(
+                            X_with_const.values, i + 1
+                        )  # +1 for constant
                     except:
                         vifs[col] = 0  # In case of errors (e.g., perfect collinearity)
 
@@ -338,7 +356,9 @@ class FeatureSelector:
 
                 if max_vif_feature[1] > self.criteria.vif_threshold:
                     feature_to_remove = max_vif_feature[0]
-                    removed[feature_to_remove] = f"high VIF ({max_vif_feature[1]:.2f}) > threshold ({self.criteria.vif_threshold})"
+                    removed[feature_to_remove] = (
+                        f"high VIF ({max_vif_feature[1]:.2f}) > threshold ({self.criteria.vif_threshold})"
+                    )
                     result.remove(feature_to_remove)
 
                     X = X.drop(columns=[feature_to_remove])
@@ -346,12 +366,12 @@ class FeatureSelector:
                     X_with_const = sm_add_constant(X_with_const)
                 else:
                     break
-                    
+
         except Exception as e:
             logger.warning(f"VIF calculation failed: {str(e)}. Skipping multicollinearity check.")
-            
+
         return result
-    
+
     def _ml_based_selection_cv(
         self,
         features: pd.DataFrame,
@@ -365,12 +385,19 @@ class FeatureSelector:
 
         import xgboost as xgb
 
-        cv = StratifiedKFold(n_splits=self.criteria.cv_folds, shuffle=True, random_state=self.random_state) if is_classification else KFold(n_splits=self.criteria.cv_folds, shuffle=True, random_state=self.random_state)
+        cv = (
+            StratifiedKFold(
+                n_splits=self.criteria.cv_folds, shuffle=True, random_state=self.random_state
+            )
+            if is_classification
+            else KFold(
+                n_splits=self.criteria.cv_folds, shuffle=True, random_state=self.random_state
+            )
+        )
 
         if is_classification:
-
             xgb_model = xgb.XGBClassifier(
-                n_estimators=100, 
+                n_estimators=100,
                 learning_rate=0.05,
                 max_depth=3,  # Shallow trees to prevent overfitting
                 min_child_weight=2,
@@ -380,15 +407,15 @@ class FeatureSelector:
                 reg_alpha=0.1,
                 reg_lambda=1,
                 random_state=self.random_state,
-
                 enable_categorical=True,
-                use_label_encoder=False
+                use_label_encoder=False,
             )
-            linear_model = LogisticRegression(random_state=self.random_state, penalty='l1', solver='liblinear', C=1.0)
+            linear_model = LogisticRegression(
+                random_state=self.random_state, penalty="l1", solver="liblinear", C=1.0
+            )
         else:
-
             xgb_model = xgb.XGBRegressor(
-                n_estimators=100, 
+                n_estimators=100,
                 learning_rate=0.05,
                 max_depth=3,
                 min_child_weight=2,
@@ -398,17 +425,15 @@ class FeatureSelector:
                 reg_alpha=0.1,
                 reg_lambda=1,
                 random_state=self.random_state,
-
-                enable_categorical=True
+                enable_categorical=True,
             )
             linear_model = Lasso(alpha=0.01, random_state=self.random_state)
 
         xgb_importances = np.zeros(features.shape[1])
         linear_importances = np.zeros(features.shape[1])
         univariate_scores = np.zeros(features.shape[1])
-        
-        try:
 
+        try:
             for train_idx, test_idx in cv.split(features, target):
                 X_train, X_test = features.iloc[train_idx], features.iloc[test_idx]
                 y_train, y_test = target.iloc[train_idx], target.iloc[test_idx]
@@ -416,41 +441,37 @@ class FeatureSelector:
                 xgb_clone = clone(xgb_model)
 
                 try:
-
                     xgb_version = xgb.__version__
                     major_version = 0
                     try:
-                        major_version = int(xgb_version.split('.')[0])
+                        major_version = int(xgb_version.split(".")[0])
                     except (ValueError, IndexError) as ve:
                         logger.warning(f"Error parsing XGBoost version: {str(ve)}")
-                    
-                    if major_version >= 2:
 
+                    if major_version >= 2:
                         xgb_clone.fit(
-                            X_train, y_train,
+                            X_train,
+                            y_train,
                             eval_set=[(X_test, y_test)],
                             early_stopping_rounds=10,
-                            verbose=False
+                            verbose=False,
                         )
                     else:
-
                         xgb_clone.fit(
-                            X_train, y_train,
+                            X_train,
+                            y_train,
                             eval_set=[(X_test, y_test)],
                             early_stopping_rounds=10,
-                            verbose=False
+                            verbose=False,
                         )
                 except TypeError as e:
                     if "early_stopping_rounds" in str(e):
-                        logger.warning("XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach")
-
-                        xgb_clone.fit(
-                            X_train, y_train,
-                            eval_set=[(X_test, y_test)],
-                            verbose=False
+                        logger.warning(
+                            "XGBoost API doesn't support early_stopping_rounds parameter in fit(), using alternative approach"
                         )
-                    else:
 
+                        xgb_clone.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
+                    else:
                         logger.error(f"XGBoost fit error: {str(e)}")
                         raise
                 except Exception as e:
@@ -458,10 +479,9 @@ class FeatureSelector:
 
                     xgb_clone.fit(X_train, y_train)
 
-                if hasattr(xgb_clone, 'feature_importances_'):
+                if hasattr(xgb_clone, "feature_importances_"):
                     xgb_importances += xgb_clone.feature_importances_
                 else:
-
                     xgb_importances += np.ones(features.shape[1]) / features.shape[1]
 
                 try:
@@ -481,26 +501,29 @@ class FeatureSelector:
 
                 f_normalized = f_stats / np.sum(f_stats) if np.sum(f_stats) > 0 else f_stats
                 univariate_scores += f_normalized
-            
+
         except Exception as e:
             logger.warning(f"Error in cross-validation importance calculation: {str(e)}")
 
             try:
-
-                simple_xgb = xgb.XGBClassifier(
-                    n_estimators=50, 
-                    random_state=self.random_state,
-                    enable_categorical=True,
-                    use_label_encoder=False
-                ) if is_classification else xgb.XGBRegressor(
-                    n_estimators=50, 
-                    random_state=self.random_state,
-                    enable_categorical=True
+                simple_xgb = (
+                    xgb.XGBClassifier(
+                        n_estimators=50,
+                        random_state=self.random_state,
+                        enable_categorical=True,
+                        use_label_encoder=False,
+                    )
+                    if is_classification
+                    else xgb.XGBRegressor(
+                        n_estimators=50, random_state=self.random_state, enable_categorical=True
+                    )
                 )
                 simple_xgb.fit(features, target)
                 xgb_importances = simple_xgb.feature_importances_ * self.criteria.cv_folds
             except Exception as fallback_error:
-                logger.error(f"Fallback XGBoost also failed: {str(fallback_error)}. Using equal importance.")
+                logger.error(
+                    f"Fallback XGBoost also failed: {str(fallback_error)}. Using equal importance."
+                )
                 xgb_importances = np.ones(features.shape[1]) * self.criteria.cv_folds
 
         xgb_importances /= self.criteria.cv_folds
@@ -508,13 +531,17 @@ class FeatureSelector:
         univariate_scores /= self.criteria.cv_folds
 
         combined_importances = np.zeros(features.shape[1])
-        weights = [0.6, 0.2, 0.2]  # Weights for XGBoost, linear, univariate (increased XGBoost weight)
-        
+        weights = [
+            0.6,
+            0.2,
+            0.2,
+        ]  # Weights for XGBoost, linear, univariate (increased XGBoost weight)
+
         for i in range(features.shape[1]):
             combined_importances[i] = (
-                weights[0] * xgb_importances[i] + 
-                weights[1] * (linear_importances[i] if i < len(linear_importances) else 0) + 
-                weights[2] * univariate_scores[i]
+                weights[0] * xgb_importances[i]
+                + weights[1] * (linear_importances[i] if i < len(linear_importances) else 0)
+                + weights[2] * univariate_scores[i]
             )
 
         importance_scores = {}
@@ -522,19 +549,22 @@ class FeatureSelector:
             importance_scores[feature] = combined_importances[i]
 
         sorted_features = sorted(
-            [(feature, score) for feature, score in importance_scores.items() 
-             if score > self.criteria.min_importance_score],
+            [
+                (feature, score)
+                for feature, score in importance_scores.items()
+                if score > self.criteria.min_importance_score
+            ],
             key=lambda x: x[1],
             reverse=True,
         )
 
         if self.criteria.max_features and len(sorted_features) > self.criteria.max_features:
-            selected = [f[0] for f in sorted_features[:self.criteria.max_features]]
+            selected = [f[0] for f in sorted_features[: self.criteria.max_features]]
         else:
             selected = [f[0] for f in sorted_features]
-        
+
         return selected, importance_scores
-    
+
     def _stability_selection(
         self,
         features: pd.DataFrame,
@@ -544,16 +574,15 @@ class FeatureSelector:
         """Perform stability selection to identify consistently important features."""
         if len(features.columns) <= 1:
             return list(features.columns)
-            
+
         n_features = len(features.columns)
         n_bootstraps = 10  # Number of bootstrap samples
 
         selection_frequency = {feature: 0 for feature in features.columns}
 
         n_samples = int(0.8 * len(features))  # Use 80% of data in each bootstrap
-        
-        for i in range(n_bootstraps):
 
+        for i in range(n_bootstraps):
             indices = np.random.choice(len(features), size=n_samples, replace=True)
             X_boot = features.iloc[indices]
             y_boot = target.iloc[indices]
@@ -578,21 +607,19 @@ class FeatureSelector:
             selection_frequency[feature] /= n_bootstraps
 
         selected_features = [
-            feature for feature, freq in selection_frequency.items() 
+            feature
+            for feature, freq in selection_frequency.items()
             if freq >= self.criteria.stability_threshold
         ]
 
         if not selected_features and features.columns.any():
-            sorted_features = sorted(
-                selection_frequency.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )
-            selected_features = [f[0] for f in sorted_features[:min(3, len(sorted_features))]]
-        
+            sorted_features = sorted(selection_frequency.items(), key=lambda x: x[1], reverse=True)
+            selected_features = [f[0] for f in sorted_features[: min(3, len(sorted_features))]]
+
         return selected_features
+
 
 def sm_add_constant(data):
     """Add constant column for statsmodels functions without importing statsmodels."""
     const = pd.Series(1, index=data.index, name="const")
-    return pd.concat([const, data], axis=1) 
+    return pd.concat([const, data], axis=1)

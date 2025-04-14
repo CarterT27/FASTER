@@ -14,87 +14,81 @@ from sklearn.pipeline import Pipeline as SklearnPipeline
 def evaluate_model(X: pd.DataFrame, y: pd.Series, is_classification: bool) -> Dict[str, float]:
     """
     Evaluate a model using cross-validation.
-    
+
     Args:
         X: Feature dataframe
         y: Target series
         is_classification: Whether it's a classification problem
-        
+
     Returns:
         Dictionary of evaluation metrics
     """
 
-    if is_classification and y.dtype == 'object':
+    if is_classification and y.dtype == "object":
         label_encoder = LabelEncoder()
         y = label_encoder.fit_transform(y)
 
-    categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-    numerical_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    categorical_features = X.select_dtypes(include=["object", "category"]).columns.tolist()
+    numerical_features = X.select_dtypes(include=["int64", "float64"]).columns.tolist()
 
     transformers = []
-    
+
     if numerical_features:
-        transformers.append(('num', StandardScaler(), numerical_features))
-    
+        transformers.append(("num", StandardScaler(), numerical_features))
+
     if categorical_features:
-        transformers.append(('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features))
+        transformers.append(("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features))
 
     if transformers:
         preprocessor = ColumnTransformer(
             transformers=transformers,
-            remainder='passthrough'  # Pass through other columns rather than dropping them
+            remainder="passthrough",  # Pass through other columns rather than dropping them
         )
     else:
         preprocessor = None
-    
+
     if is_classification:
         base_model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model_key = 'classifier'
+        model_key = "classifier"
         scoring = {
-            'accuracy': 'accuracy',
-            'f1': 'f1_weighted',
-            'roc_auc': 'roc_auc_ovr_weighted' if len(np.unique(y)) > 2 else 'roc_auc'
+            "accuracy": "accuracy",
+            "f1": "f1_weighted",
+            "roc_auc": "roc_auc_ovr_weighted" if len(np.unique(y)) > 2 else "roc_auc",
         }
     else:
         base_model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model_key = 'regressor'
+        model_key = "regressor"
         scoring = {
-            'r2': 'r2',
-            'mae': 'neg_mean_absolute_error',
-            'rmse': 'neg_root_mean_squared_error'
+            "r2": "r2",
+            "mae": "neg_mean_absolute_error",
+            "rmse": "neg_root_mean_squared_error",
         }
 
     if preprocessor:
-        model = SklearnPipeline([
-            ('preprocessor', preprocessor),
-            (model_key, base_model)
-        ])
+        model = SklearnPipeline([("preprocessor", preprocessor), (model_key, base_model)])
     else:
         model = base_model
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        cv_results = cross_validate(
-            model, X, y,
-            cv=5,
-            scoring=scoring,
-            return_train_score=True
-        )
+        cv_results = cross_validate(model, X, y, cv=5, scoring=scoring, return_train_score=True)
 
     result = {}
 
-    for metric, scores in [(k.replace('test_', ''), v) for k, v in cv_results.items() if k.startswith('test_')]:
-
-        if metric in ['mae', 'rmse']:
-            result[f'test_{metric}'] = -scores.mean()
+    for metric, scores in [
+        (k.replace("test_", ""), v) for k, v in cv_results.items() if k.startswith("test_")
+    ]:
+        if metric in ["mae", "rmse"]:
+            result[f"test_{metric}"] = -scores.mean()
         else:
-            result[f'test_{metric}'] = scores.mean()
+            result[f"test_{metric}"] = scores.mean()
 
-    for metric, scores in [(k.replace('train_', ''), v) for k, v in cv_results.items() if k.startswith('train_')]:
-
-        if metric in ['mae', 'rmse']:
-            result[f'train_{metric}'] = -scores.mean()
+    for metric, scores in [
+        (k.replace("train_", ""), v) for k, v in cv_results.items() if k.startswith("train_")
+    ]:
+        if metric in ["mae", "rmse"]:
+            result[f"train_{metric}"] = -scores.mean()
         else:
-            result[f'train_{metric}'] = scores.mean()
-    
-    return result 
+            result[f"train_{metric}"] = scores.mean()
+
+    return result

@@ -14,19 +14,22 @@ import logging
 
 from faster.domain_knowledge import DomainKnowledgeExtractor, DomainInsight, PromptConfig
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
+
 
 def verify_openrouter_api_key() -> str:
     """
     Verify and retrieve the OpenRouter API key.
-    
+
     Returns:
         str: Validated API key or raises a pytest.skip exception
     """
 
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    
+
     if not api_key:
         pytest.skip("Skipping non-mock test: OPENROUTER_API_KEY environment variable not set")
 
@@ -39,68 +42,75 @@ def verify_openrouter_api_key() -> str:
 
     masked_key = api_key[:4] + "..." + api_key[-4:] if len(api_key) > 8 else "***"
     logger.info(f"Using OpenRouter API key: {masked_key} (length: {len(api_key)})")
-    
+
     return api_key
+
 
 def configure_openai_client(api_key: str) -> OpenAI:
     """
     Configure and return an OpenAI client configured for OpenRouter.
-    
+
     Args:
         api_key: The OpenRouter API key
-        
+
     Returns:
         openai.OpenAI: Configured client
     """
     logger.info(f"Configuring OpenAI client with base URL: https://openrouter.ai/api/v1")
-    
+
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
     )
 
+
 @pytest.fixture
 def sample_data():
     """Create sample DataFrame for testing."""
-    return pd.DataFrame({
-        'numeric_feature': [1, 2, 3, 4, 5],
-        'categorical_feature': ['A', 'B', 'A', 'C', 'B'],
-        'text_feature': [
-            'This is a long text',
-            'Another text sample',
-            'More text data here',
-            'Sample text content',
-            'Final text example'
-        ],
-        'target': [0, 1, 0, 1, 1]
-    })
+    return pd.DataFrame(
+        {
+            "numeric_feature": [1, 2, 3, 4, 5],
+            "categorical_feature": ["A", "B", "A", "C", "B"],
+            "text_feature": [
+                "This is a long text",
+                "Another text sample",
+                "More text data here",
+                "Sample text content",
+                "Final text example",
+            ],
+            "target": [0, 1, 0, 1, 1],
+        }
+    )
+
 
 @pytest.fixture
 def mock_llm_response():
     """Create a mock LLM response."""
-    return json.dumps([
-        {
-            "feature_name": "numeric_feature",
-            "importance": 0.8,
-            "relationships": ["categorical_feature"],
-            "suggested_transformations": ["log", "zscore"],
-            "rationale": "High importance numeric feature with right-skewed distribution"
-        },
-        {
-            "feature_name": "categorical_feature",
-            "importance": 0.6,
-            "relationships": ["numeric_feature"],
-            "suggested_transformations": ["one_hot"],
-            "rationale": "Categorical feature with moderate correlation to target"
-        }
-    ])
+    return json.dumps(
+        [
+            {
+                "feature_name": "numeric_feature",
+                "importance": 0.8,
+                "relationships": ["categorical_feature"],
+                "suggested_transformations": ["log", "zscore"],
+                "rationale": "High importance numeric feature with right-skewed distribution",
+            },
+            {
+                "feature_name": "categorical_feature",
+                "importance": 0.6,
+                "relationships": ["numeric_feature"],
+                "suggested_transformations": ["one_hot"],
+                "rationale": "Categorical feature with moderate correlation to target",
+            },
+        ]
+    )
+
 
 @pytest.fixture
 def domain_extractor():
     """Create a DomainKnowledgeExtractor instance."""
 
     try:
-
         api_key = verify_openrouter_api_key()
 
         client = configure_openai_client(api_key)
@@ -110,39 +120,35 @@ def domain_extractor():
                 model="deepseek/deepseek-chat:free",
                 messages=[{"role": "user", "content": "Hello, this is a test"}],
                 temperature=0.0,
-                max_tokens=10
+                max_tokens=10,
             )
             logger.info("OpenRouter API test successful")
 
             extractor = DomainKnowledgeExtractor(
-                model_name="deepseek/deepseek-chat:free",
-                temperature=0.0,
-                api_key=api_key
+                model_name="deepseek/deepseek-chat:free", temperature=0.0, api_key=api_key
             )
             return extractor
-            
+
         except Exception as e:
             logger.error(f"OpenRouter API test failed: {str(e)}")
 
     except Exception:
-
         pass
 
-    with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'dummy_key'}):
-
-        with patch('openai.OpenAI') as mock_openai:
-
+    with patch.dict(os.environ, {"OPENROUTER_API_KEY": "dummy_key"}):
+        with patch("openai.OpenAI") as mock_openai:
             mock_client = Mock()
 
             mock_client.api_key = ""
 
             mock_client.base_url = "https://openrouter.ai/api/v1"
             mock_openai.return_value = mock_client
-            
+
             extractor = DomainKnowledgeExtractor()
 
             extractor.client = mock_client
             return extractor
+
 
 def test_init_without_api_key():
     """Test initialization without API key."""
@@ -150,16 +156,18 @@ def test_init_without_api_key():
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY.*required"):
             DomainKnowledgeExtractor()
 
+
 def test_init_with_custom_config(domain_extractor):
     """Test initialization with custom prompt config."""
     custom_config = PromptConfig(
         context_template="custom context",
         expert_template="custom expert",
         feature_suggestion_template="custom suggestion",
-        validation_template="custom validation"
+        validation_template="custom validation",
     )
     extractor = DomainKnowledgeExtractor(prompt_config=custom_config)
     assert extractor.prompt_config.context_template == "custom context"
+
 
 def test_parse_llm_response_valid_json(domain_extractor, mock_llm_response):
     """Test parsing valid JSON LLM response."""
@@ -168,24 +176,23 @@ def test_parse_llm_response_valid_json(domain_extractor, mock_llm_response):
     assert insights[0]["feature_name"] == "numeric_feature"
     assert isinstance(insights[0]["importance"], float)
 
+
 def test_parse_llm_response_invalid_json(domain_extractor):
     """Test parsing invalid JSON LLM response."""
     invalid_response = "Not a JSON response"
     with pytest.raises(ValueError, match="Could not parse LLM response"):
         domain_extractor._parse_llm_response(invalid_response)
 
+
 def test_parse_llm_response_missing_fields(domain_extractor):
     """Test parsing response with missing required fields."""
-    invalid_json = json.dumps([{
-        "feature_name": "test",
-        "importance": 0.5
+    invalid_json = json.dumps([{"feature_name": "test", "importance": 0.5}])
 
-    }])
-    
     with pytest.raises(ValueError, match="Missing required fields"):
         insights = domain_extractor._parse_llm_response(invalid_json)
 
         pytest.fail("Expected ValueError but no exception was raised")
+
 
 def test_generate_data_summary(domain_extractor, sample_data):
     """Test data summary generation."""
@@ -196,24 +203,18 @@ def test_generate_data_summary(domain_extractor, sample_data):
     assert "missing_values" in summary
     assert "target_distribution" in summary
 
-@patch('openai.OpenAI')
+
+@patch("openai.OpenAI")
 def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_response):
     """Test successful LLM query with retry."""
 
-    mock_message = ChatCompletionMessage(
-        content=mock_llm_response,
-        role="assistant"
-    )
+    mock_message = ChatCompletionMessage(content=mock_llm_response, role="assistant")
     mock_completion = ChatCompletion(
         id="test_id",
-        choices=[{
-            "finish_reason": "stop",
-            "index": 0,
-            "message": mock_message
-        }],
+        choices=[{"finish_reason": "stop", "index": 0, "message": mock_message}],
         created=1234567890,
         model="test-model",
-        object="chat.completion"
+        object="chat.completion",
     )
 
     mock_client = Mock()
@@ -233,22 +234,19 @@ def test_query_llm_with_retry_success(mock_openai, domain_extractor, mock_llm_re
         temperature=0.0,
         top_p=0.95,
         max_tokens=2048,
-        response_format={"type": "json_object"}
+        response_format={"type": "json_object"},
     )
 
-@patch('openai.OpenAI')
+
+@patch("openai.OpenAI")
 def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
     """Test LLM query with retry on failure."""
 
     mock_client = Mock()
     mock_client.chat.completions.create.side_effect = [
-        httpx.HTTPStatusError(
-            "401 Unauthorized",
-            request=Mock(),
-            response=Mock(status_code=401)
-        )
+        httpx.HTTPStatusError("401 Unauthorized", request=Mock(), response=Mock(status_code=401))
     ] * 3  # Will raise error 3 times
-    
+
     mock_openai.return_value = mock_client
     domain_extractor.client = mock_client
 
@@ -257,36 +255,38 @@ def test_query_llm_with_retry_failure(mock_openai, domain_extractor):
         domain_extractor._query_llm_with_retry("test prompt", request_id)
     assert mock_client.chat.completions.create.call_count == 3  # Should retry 3 times
 
-@patch('faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry')
+
+@patch("faster.domain_knowledge.DomainKnowledgeExtractor._query_llm_with_retry")
 def test_extract_knowledge_integration(mock_query, domain_extractor):
     """Test full knowledge extraction pipeline."""
 
-    data = pd.DataFrame({
-        'numeric_feature': range(20),
-        'categorical_feature': ['A', 'B'] * 10,
-        'text_feature': ['Sample text'] * 20,
-        'target': [0, 1] * 10
-    })
-    
+    data = pd.DataFrame(
+        {
+            "numeric_feature": range(20),
+            "categorical_feature": ["A", "B"] * 10,
+            "text_feature": ["Sample text"] * 20,
+            "target": [0, 1] * 10,
+        }
+    )
+
     mock_query.return_value = [
         {
             "feature_name": "numeric_feature",
             "importance": 0.8,
             "relationships": ["categorical_feature"],
             "suggested_transformations": ["log", "zscore"],
-            "rationale": "High importance numeric feature"
+            "rationale": "High importance numeric feature",
         }
     ]
-    
+
     insights = domain_extractor.extract_knowledge(
-        data=data,
-        target_column="target",
-        problem_description="Test classification problem"
+        data=data, target_column="target", problem_description="Test classification problem"
     )
-    
+
     assert len(insights) == 1
     assert all(isinstance(insight, DomainInsight) for insight in insights)
     assert insights[0].feature_name == "numeric_feature"
+
 
 def test_default_prompt_config(domain_extractor):
     """Test default prompt configuration."""
@@ -295,4 +295,4 @@ def test_default_prompt_config(domain_extractor):
     assert "{data_summary}" in config.context_template
     assert "{initial_insights}" in config.expert_template
     assert "{domain_context}" in config.feature_suggestion_template
-    assert "{suggested_features}" in config.validation_template 
+    assert "{suggested_features}" in config.validation_template

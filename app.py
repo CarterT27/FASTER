@@ -25,22 +25,24 @@ from faster.feature_selection import SelectionCriteria
 from faster.domain_knowledge import DomainKnowledgeExtractor
 
 from utils.datasets import (
-    load_iris_dataset, 
-    load_auto_mpg_dataset, 
-    load_titanic_dataset, 
-    load_horsepower_mpg_dataset
+    load_iris_dataset,
+    load_auto_mpg_dataset,
+    load_titanic_dataset,
+    load_horsepower_mpg_dataset,
 )
 from utils.evaluation import evaluate_model
 from utils.visualization import plot_feature_importance, plot_metrics_comparison
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="FASTER Pipeline Demo",
     page_icon="🚀",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 st.title("🚀 FASTER Pipeline Demo")
@@ -52,23 +54,22 @@ to enhance model performance.
 You can either select from predefined datasets or upload your own dataset to see how FASTER improves model performance.
 """)
 
+
 def main():
     """Main function to run the Streamlit app."""
 
     st.sidebar.title("Configuration")
 
     dataset_option = st.sidebar.radio(
-        "Select Dataset Source",
-        ["Predefined Dataset", "Upload Dataset"]
+        "Select Dataset Source", ["Predefined Dataset", "Upload Dataset"]
     )
-    
+
     if dataset_option == "Predefined Dataset":
         data, target_column, is_classification, problem_description = load_predefined_dataset()
     else:
         data, target_column, is_classification, problem_description = load_custom_dataset()
-    
-    if data is not None:
 
+    if data is not None:
         with st.expander("Dataset Information", expanded=True):
             st.write(f"Dataset shape: {data.shape}")
             st.write(f"Target column: {target_column}")
@@ -83,13 +84,17 @@ def main():
         use_mock = not bool(api_key.strip())
         if use_mock:
             st.sidebar.warning("No API key provided. Using mock LLM responses.")
-        
+
         model_name = st.sidebar.selectbox(
             "LLM Model",
-            ["deepseek/deepseek-chat:free", "anthropic/claude-3-sonnet:free", "mistral/mistral-large:free"],
-            index=0
+            [
+                "deepseek/deepseek-chat:free",
+                "anthropic/claude-3-sonnet:free",
+                "mistral/mistral-large:free",
+            ],
+            index=0,
         )
-        
+
         temperature = st.sidebar.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
 
         st.sidebar.subheader("Feature Engineering Configuration")
@@ -98,12 +103,11 @@ def main():
         correction_method = st.sidebar.selectbox(
             "Multiple Testing Correction Method",
             ["fdr_bh", "bonferroni", "sidak", "holm", "none"],
-            index=0
+            index=0,
         )
 
         if st.button("Run FASTER Pipeline"):
             with st.spinner("Running FASTER Pipeline..."):
-
                 config = PipelineConfig(
                     model_name=model_name,
                     temperature=temperature,
@@ -114,11 +118,8 @@ def main():
                     selection_criteria=SelectionCriteria(),
                     output_dir=None,
                     save_intermediate=False,
-                    keep_all_features=True
+                    keep_all_features=True,
                 )
-
-
-
 
                 results = run_pipeline(
                     data=data,
@@ -127,19 +128,18 @@ def main():
                     is_classification=is_classification,
                     config=config,
                     use_mock=use_mock,
-                    api_key=api_key
+                    api_key=api_key,
                 )
 
                 display_results(results, data, target_column, is_classification)
 
+
 def load_predefined_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bool, str]:
     """Load a predefined dataset based on user selection."""
     dataset_name = st.sidebar.selectbox(
-        "Select Dataset",
-        ["Iris", "Auto MPG", "Titanic", "Horsepower-MPG"],
-        index=0
+        "Select Dataset", ["Iris", "Auto MPG", "Titanic", "Horsepower-MPG"], index=0
     )
-    
+
     if dataset_name == "Iris":
         data, target = load_iris_dataset()
         is_classification = False  # Regression problem (predicting sepal length)
@@ -159,7 +159,7 @@ def load_predefined_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bo
         - There are allometric relationships between different flower parts
         """
         return data, "sepal_length", is_classification, problem_description
-    
+
     elif dataset_name == "Auto MPG":
         data, target = load_auto_mpg_dataset()
         is_classification = False  # Regression problem (predicting MPG)
@@ -185,7 +185,7 @@ def load_predefined_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bo
         - The dataset contains cars from the 1970s and early 1980s during fuel crises
         """
         return data, "mpg", is_classification, problem_description
-    
+
     elif dataset_name == "Titanic":
         data, target = load_titanic_dataset()
         is_classification = True  # Classification problem (predicting survival)
@@ -208,7 +208,7 @@ def load_predefined_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bo
         - Port of embarkation could indicate passenger's social status
         """
         return data, "Survived", is_classification, problem_description
-    
+
     elif dataset_name == "Horsepower-MPG":
         data, target = load_horsepower_mpg_dataset()
         is_classification = False  # Regression problem (predicting MPG)
@@ -221,43 +221,39 @@ def load_predefined_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bo
         - There may be diminishing returns where increases in horsepower above certain thresholds have less impact on MPG
         """
         return data, "mpg", is_classification, problem_description
-    
+
     return None, None, False, ""
+
 
 def load_custom_dataset() -> Tuple[Optional[pd.DataFrame], Optional[str], bool, str]:
     """Load a custom dataset from user upload."""
     uploaded_file = st.sidebar.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
-    
+
     if uploaded_file is not None:
         try:
-            if uploaded_file.name.endswith('.csv'):
+            if uploaded_file.name.endswith(".csv"):
                 data = pd.read_csv(uploaded_file)
             else:
                 data = pd.read_excel(uploaded_file)
 
-            target_column = st.sidebar.selectbox(
-                "Select Target Column",
-                data.columns.tolist()
-            )
+            target_column = st.sidebar.selectbox("Select Target Column", data.columns.tolist())
 
-            problem_type = st.sidebar.radio(
-                "Problem Type",
-                ["Classification", "Regression"]
-            )
+            problem_type = st.sidebar.radio("Problem Type", ["Classification", "Regression"])
             is_classification = problem_type == "Classification"
 
             problem_description = st.sidebar.text_area(
                 "Problem Description (include domain knowledge if available)",
                 height=150,
-                placeholder="Describe the problem and any domain knowledge you have..."
+                placeholder="Describe the problem and any domain knowledge you have...",
             )
-            
+
             return data, target_column, is_classification, problem_description
-            
+
         except Exception as e:
             st.error(f"Error loading dataset: {str(e)}")
-    
+
     return None, None, False, ""
+
 
 def run_pipeline(
     data: pd.DataFrame,
@@ -266,11 +262,11 @@ def run_pipeline(
     is_classification: bool,
     config: PipelineConfig,
     use_mock: bool,
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run the FASTER pipeline and return results.
-    
+
     Args:
         data: Input dataframe with target column
         target_column: Name of the target column
@@ -279,7 +275,7 @@ def run_pipeline(
         config: Pipeline configuration
         use_mock: Whether to use mock LLM responses
         api_key: Optional OpenRouter API key to pass to LLM-based components
-        
+
     Returns:
         Dictionary containing pipeline results and evaluation metrics
     """
@@ -294,7 +290,6 @@ def run_pipeline(
 
     pipeline_no_domain = Pipeline(config)
 
-
     domain_config = copy.deepcopy(config)
     pipeline_with_domain = Pipeline(domain_config, api_key=api_key)
 
@@ -304,7 +299,7 @@ def run_pipeline(
         target_column=target_column,
         problem_description="Predicting " + target_column,
         is_classification=is_classification,
-        keep_all_features=True
+        keep_all_features=True,
     )
 
     st.info("Running FASTER pipeline with domain knowledge...")
@@ -313,7 +308,7 @@ def run_pipeline(
         target_column=target_column,
         problem_description=problem_description,
         is_classification=is_classification,
-        keep_all_features=True
+        keep_all_features=True,
     )
 
     no_domain_features = result_no_domain.transformed_data
@@ -335,18 +330,16 @@ def run_pipeline(
         "no_domain_features": no_domain_features,
         "with_domain_features": with_domain_features,
         "result_no_domain": result_no_domain,
-        "result_with_domain": result_with_domain
+        "result_with_domain": result_with_domain,
     }
 
+
 def display_results(
-    results: Dict[str, Any],
-    data: pd.DataFrame,
-    target_column: str,
-    is_classification: bool
+    results: Dict[str, Any], data: pd.DataFrame, target_column: str, is_classification: bool
 ):
     """
     Display pipeline results and evaluation metrics.
-    
+
     Args:
         results: Pipeline results and evaluation metrics
         data: Original dataframe
@@ -363,31 +356,30 @@ def display_results(
     result_no_domain = results["result_no_domain"]
     result_with_domain = results["result_with_domain"]
 
-    tabs = st.tabs(["Performance Metrics", "Feature Analysis", "Data Transformation", "Pipeline Details"])
+    tabs = st.tabs(
+        ["Performance Metrics", "Feature Analysis", "Data Transformation", "Pipeline Details"]
+    )
 
     with tabs[0]:
         st.subheader("Model Performance Comparison")
 
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
             st.markdown("### Baseline Model")
             display_metrics(baseline_scores, is_classification, None)
-        
+
         with col2:
             st.markdown("### FASTER (No Domain Knowledge)")
             display_metrics(faster_no_domain_scores, is_classification, baseline_scores)
-        
+
         with col3:
             st.markdown("### FASTER (With Domain Knowledge)")
             display_metrics(faster_with_domain_scores, is_classification, baseline_scores)
 
         st.subheader("Metrics Comparison")
         fig = plot_metrics_comparison(
-            baseline_scores, 
-            faster_no_domain_scores, 
-            faster_with_domain_scores,
-            is_classification
+            baseline_scores, faster_no_domain_scores, faster_with_domain_scores, is_classification
         )
         st.pyplot(fig)
 
@@ -396,45 +388,54 @@ def display_results(
 
         st.markdown("### Feature Counts")
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
             st.metric("Original Features", len(data.drop(target_column, axis=1).columns))
-        
+
         with col2:
             st.metric(
-                "FASTER (No Domain) Features", 
+                "FASTER (No Domain) Features",
                 len(no_domain_features.columns),
-                len(no_domain_features.columns) - len(data.drop(target_column, axis=1).columns)
+                len(no_domain_features.columns) - len(data.drop(target_column, axis=1).columns),
             )
-        
+
         with col3:
             st.metric(
-                "FASTER (With Domain) Features", 
+                "FASTER (With Domain) Features",
                 len(with_domain_features.columns),
-                len(with_domain_features.columns) - len(data.drop(target_column, axis=1).columns)
+                len(with_domain_features.columns) - len(data.drop(target_column, axis=1).columns),
             )
 
         st.markdown("### Selected Features")
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             st.markdown("#### FASTER (No Domain Knowledge)")
-            if hasattr(result_no_domain, "selected_features") and result_no_domain.selected_features:
+            if (
+                hasattr(result_no_domain, "selected_features")
+                and result_no_domain.selected_features
+            ):
                 st.write(sorted(result_no_domain.selected_features))
             else:
                 st.write("No features selected")
-        
+
         with col2:
             st.markdown("#### FASTER (With Domain Knowledge)")
-            if hasattr(result_with_domain, "selected_features") and result_with_domain.selected_features:
+            if (
+                hasattr(result_with_domain, "selected_features")
+                and result_with_domain.selected_features
+            ):
                 st.write(sorted(result_with_domain.selected_features))
             else:
                 st.write("No features selected")
 
         st.markdown("### Feature Importance")
         try:
-            if hasattr(result_with_domain, "feature_importances") and result_with_domain.feature_importances is not None:
+            if (
+                hasattr(result_with_domain, "feature_importances")
+                and result_with_domain.feature_importances is not None
+            ):
                 fig = plot_feature_importance(result_with_domain.feature_importances)
                 st.pyplot(fig)
             else:
@@ -446,13 +447,13 @@ def display_results(
         st.subheader("Data Transformation")
 
         st.markdown("### Transformed Data Samples")
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
             st.markdown("#### FASTER (No Domain Knowledge)")
             st.dataframe(no_domain_features.head())
-        
+
         with col2:
             st.markdown("#### FASTER (With Domain Knowledge)")
             st.dataframe(with_domain_features.head())
@@ -461,42 +462,50 @@ def display_results(
         st.subheader("Pipeline Details")
 
         st.markdown("### Domain Knowledge Extraction")
-        
+
         if hasattr(result_with_domain, "domain_knowledge") and result_with_domain.domain_knowledge:
             st.json(result_with_domain.domain_knowledge)
         else:
             st.info("Domain knowledge information not available")
 
         st.markdown("### Statistical Tests")
-        
-        if hasattr(result_with_domain, "statistical_tests") and result_with_domain.statistical_tests:
+
+        if (
+            hasattr(result_with_domain, "statistical_tests")
+            and result_with_domain.statistical_tests
+        ):
             st.json(result_with_domain.statistical_tests)
         else:
             st.info("Statistical tests information not available")
 
-def display_metrics(metrics: Dict[str, float], is_classification: bool, baseline_metrics: Optional[Dict[str, float]]):
+
+def display_metrics(
+    metrics: Dict[str, float], is_classification: bool, baseline_metrics: Optional[Dict[str, float]]
+):
     """
     Display model performance metrics.
-    
+
     Args:
         metrics: Dictionary of metrics
         is_classification: Whether it's a classification problem
         baseline_metrics: Baseline metrics for comparison (optional)
     """
 
-    test_metrics = {k.replace('test_', ''): v for k, v in metrics.items() if k.startswith('test_')}
+    test_metrics = {k.replace("test_", ""): v for k, v in metrics.items() if k.startswith("test_")}
 
-    train_metrics = {k.replace('train_', ''): v for k, v in metrics.items() if k.startswith('train_')}
+    train_metrics = {
+        k.replace("train_", ""): v for k, v in metrics.items() if k.startswith("train_")
+    }
 
     st.markdown("#### Test Metrics")
     for metric, value in test_metrics.items():
         if baseline_metrics is not None:
-            baseline_value = baseline_metrics.get(f'test_{metric}', 0)
+            baseline_value = baseline_metrics.get(f"test_{metric}", 0)
             delta = value - baseline_value
 
-            if metric in ['mae', 'rmse']:
+            if metric in ["mae", "rmse"]:
                 delta = -delta
-                
+
             st.metric(label=metric, value=f"{value:.4f}", delta=f"{delta:.4f}")
         else:
             st.metric(label=metric, value=f"{value:.4f}")
@@ -504,15 +513,16 @@ def display_metrics(metrics: Dict[str, float], is_classification: bool, baseline
     st.markdown("#### Train Metrics")
     for metric, value in train_metrics.items():
         if baseline_metrics is not None:
-            baseline_value = baseline_metrics.get(f'train_{metric}', 0)
+            baseline_value = baseline_metrics.get(f"train_{metric}", 0)
             delta = value - baseline_value
 
-            if metric in ['mae', 'rmse']:
+            if metric in ["mae", "rmse"]:
                 delta = -delta
-                
+
             st.metric(label=metric, value=f"{value:.4f}", delta=f"{delta:.4f}")
         else:
             st.metric(label=metric, value=f"{value:.4f}")
 
+
 if __name__ == "__main__":
-    main() 
+    main()
